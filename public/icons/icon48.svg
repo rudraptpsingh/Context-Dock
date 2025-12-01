@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="48" height="48">
+  <!-- Back Document -->
+  <rect x="24" y="8" width="32" height="44" rx="4" fill="#94a3b8" />
+  <!-- Middle Document -->
+  <rect x="16" y="14" width="32" height="44" rx="4" fill="#3b82f6" />
+  <!-- Front Document -->
+  <rect x="8" y="20" width="32" height="44" rx="4" fill="#1e3a8a" stroke="#ffffff" stroke-width="0" />
+  
+  <!-- Lines on Front Document -->
+  <rect x="14" y="29" width="20" height="4" rx="1" fill="white" fill-opacity="0.9" />
+  <rect x="14" y="37" width="20" height="4" rx="1" fill="white" fill-opacity="0.9" />
+  <rect x="14" y="45" width="14" height="4" rx="1" fill="white" fill-opacity="0.9" />
+</svg>

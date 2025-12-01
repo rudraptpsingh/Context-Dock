@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "Context Stash",
+  "description": "Collect snippets into projects and inject context into AI chats. Organize research and seamlessly paste into ChatGPT, Claude & more.",
+  "version": "1.0.0",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "storage",
+    "contextMenus",
+    "scripting"
+  ],
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "action": {
+    "default_title": "Open Context Stash"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://chatgpt.com/*",
+        "*://chat.openai.com/*",
+        "*://claude.ai/*",
+        "*://gemini.google.com/*",
+        "*://www.perplexity.ai/*",
+        "*://perplexity.ai/*"
+      ],
+      "js": ["src/content/injector.ts"]
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/clipper.ts"]
+    }
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ]
+}
