@@ -84,6 +84,14 @@ export function useProjects() {
     await storage.deleteSnippet(projectId, snippetId);
   }, []);
 
+  const updateSnippet = useCallback(async (
+    projectId: string,
+    snippetId: string,
+    updates: Partial<Omit<Snippet, 'id' | 'timestamp'>>
+  ): Promise<void> => {
+    await storage.updateSnippet(projectId, snippetId, updates);
+  }, []);
+
   const addSnippetToActive = useCallback(async (
     snippet: Omit<Snippet, 'id' | 'timestamp'>
   ): Promise<Snippet | null> => {
@@ -102,6 +110,7 @@ export function useProjects() {
     setActiveProjectId,
     addSnippet,
     deleteSnippet,
+    updateSnippet,
     addSnippetToActive,
     refresh: loadData,
   };

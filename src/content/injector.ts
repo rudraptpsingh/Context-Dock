@@ -331,6 +331,68 @@ const STYLES = `
   }
 `;
 
+function setReactTextarea(el: HTMLTextAreaElement, value: string): boolean {
+  try {
+    // Get the setter from the native prototype to bypass React's tracking
+    const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype,
+      "value"
+    )?.set;
+
+    if (!nativeTextAreaValueSetter) return false;
+
+    nativeTextAreaValueSetter.call(el, value);
+    
+    // Dispatch events to trigger React's change listeners
+    el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    
+    el.focus();
+    return true;
+  } catch (e) {
+    console.error("Context Stash: React setter failed", e);
+    return false;
+  }
+}
+
+/**
+ * Robustly inserts text into a ContentEditable div (Claude, Gemini)
+ */
+function insertIntoContentEditable(el: HTMLElement, text: string): boolean {
+  try {
+    el.focus();
+    
+    // execCommand is deprecated but handles the complex internal event triggers 
+    // required by editors like ProseMirror (Claude) better than range manipulation
+    const success = document.execCommand('insertText', false, text);
+    
+    if (!success) {
+      // Fallback: Direct Range Manipulation
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false); // Move cursor to end
+        sel.addRange(range);
+        
+        const textNode = document.createTextNode(text);
+        range.insertNode(textNode);
+        range.collapse(false); // Move cursor after inserted text
+        
+        el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      }
+    }
+    
+    return true;
+  } catch (e) {
+    console.error("Context Stash: ContentEditable insert failed", e);
+    return false;
+  }
+}
+
+// --- WIDGET CLASS ---
+
 interface Project {
   id: string;
   name: string;
@@ -338,6 +400,7 @@ interface Project {
     id: string;
     type: 'selection' | 'page_summary' | 'note';
     content: string;
+    label?: string;
     sourceUrl?: string;
     sourceTitle?: string;
     timestamp: number;
@@ -346,10 +409,6 @@ interface Project {
 
 class ContextStashWidget {
   private container: HTMLDivElement | null = null;
-  private isOpen = false;
-  private project: Project | null = null;
-  private projects: Project[] = [];
-  private activeProjectId: string | null = null;
   private site: string | null = null;
 
   constructor() {
@@ -357,346 +416,36 @@ class ContextStashWidget {
   }
 
   private init(): void {
-    // Detect site and set data attribute for CSS positioning
     this.detectSite();
     
     // Inject styles
-    const styleEl = document.createElement('style');
-    styleEl.id = 'context-dock-styles';
-    styleEl.textContent = STYLES;
-    document.head.appendChild(styleEl);
+    if (!document.getElementById('context-dock-styles')) {
+      const styleEl = document.createElement('style');
+      styleEl.id = 'context-dock-styles';
+      styleEl.textContent = STYLES;
+      document.head.appendChild(styleEl);
+    }
 
-    // Create widget container
-    this.container = document.createElement('div');
-    this.container.id = 'context-dock-widget';
-    this.container.innerHTML = this.renderWidget();
-    document.body.appendChild(this.container);
-
-    // Initial positioning relative to chat input (especially important for Perplexity)
-    this.updatePosition();
-
-    // Bind events
-    this.bindEvents();
-    
-    console.log('[Context Stash] Widget initialized');
+    // Create a hidden container to maintain state if we enable the UI later
+    if (!document.getElementById('context-dock-widget')) {
+      this.container = document.createElement('div');
+      this.container.id = 'context-dock-widget';
+      document.body.appendChild(this.container);
+    }
   }
 
   private detectSite(): void {
     const hostname = window.location.hostname;
-    
-    if (hostname.includes('perplexity.ai')) {
-      this.site = 'perplexity';
-    } else if (hostname.includes('chatgpt.com') || hostname.includes('chat.openai.com')) {
-      this.site = 'chatgpt';
-    } else if (hostname.includes('claude.ai')) {
-      this.site = 'claude';
-    } else if (hostname.includes('gemini.google.com')) {
-      this.site = 'gemini';
-    }
-    
-    if (this.site) {
-      document.body.setAttribute('data-context-dock-site', this.site);
-    }
-  }
-
-  private renderWidget(): string {
-    // UI has been intentionally disabled; we keep the injection logic for
-    // right-click \"Paste Context\" but do not render any floating widget.
-    return '';
-  }
-
-  private bindEvents(): void {
-    const pill = document.getElementById('context-dock-pill');
-    const closeBtn = document.getElementById('context-dock-close-btn');
-
-    pill?.addEventListener('click', () => this.togglePanel());
-    closeBtn?.addEventListener('click', () => this.closePanel());
-
-    // Close on outside click
-    document.addEventListener('click', (e) => {
-      if (this.isOpen && this.container && !this.container.contains(e.target as Node)) {
-        this.closePanel();
-      }
-    });
-
-    // Reposition on resize/scroll like Grammarly does to stay near the input
-    window.addEventListener('resize', () => this.updatePosition());
-    window.addEventListener('scroll', () => this.updatePosition(), true);
+    if (hostname.includes('perplexity.ai')) this.site = 'perplexity';
+    else if (hostname.includes('chatgpt.com') || hostname.includes('openai.com')) this.site = 'chatgpt';
+    else if (hostname.includes('claude.ai')) this.site = 'claude';
+    else if (hostname.includes('gemini.google.com')) this.site = 'gemini';
   }
 
   /**
-   * Find the primary chat input element for the current site.
-   * This is used to anchor the floating Dock near the input, similar to Grammarly.
+   * Formats the project snippets into a Markdown string
+   * This is where Labels are handled.
    */
-  private getAnchorElement(): HTMLElement | null {
-    const hostname = window.location.hostname;
-
-    // Perplexity: textarea inside the main search box
-    if (hostname.includes('perplexity.ai')) {
-      const selectors = [
-        'textarea[placeholder*="Ask anything"]',
-        'textarea[placeholder*="Ask Anything"]',
-        'textarea[placeholder*="ask anything"]',
-        'textarea',
-        '[role="textbox"][contenteditable="true"]',
-      ];
-
-      for (const selector of selectors) {
-        const el = document.querySelector(selector) as HTMLElement | null;
-        if (el && el.offsetParent !== null) {
-          return el;
-        }
-      }
-    }
-
-    // ChatGPT
-    if (hostname.includes('chatgpt.com') || hostname.includes('chat.openai.com')) {
-      const el =
-        (document.querySelector('#prompt-textarea') as HTMLElement | null) ||
-        (document.querySelector('textarea[data-id="root"]') as HTMLElement | null) ||
-        (document.querySelector('textarea') as HTMLElement | null);
-      if (el && el.offsetParent !== null) return el;
-    }
-
-    // Claude
-    if (hostname.includes('claude.ai')) {
-      const editable = document.querySelector('div[contenteditable="true"]') as HTMLElement | null;
-      if (editable && editable.offsetParent !== null && editable.offsetHeight > 20) return editable;
-      const ta = document.querySelector('textarea') as HTMLElement | null;
-      if (ta && ta.offsetParent !== null) return ta;
-    }
-
-    // Gemini
-    if (hostname.includes('gemini.google.com')) {
-      const textbox = document.querySelector('[role="textbox"][contenteditable="true"]') as HTMLElement | null;
-      if (textbox && textbox.offsetParent !== null) return textbox;
-      const ta =
-        (document.querySelector('rich-textarea textarea') as HTMLElement | null) ||
-        (document.querySelector('textarea') as HTMLElement | null);
-      if (ta && ta.offsetParent !== null) return ta;
-    }
-
-    return null;
-  }
-
-  /**
-   * Position the Dock relative to the detected chat input element.
-   * For anchored sites (like Perplexity), this keeps the pill visually attached
-   * to the input, instead of a hard-coded viewport position.
-   */
-  private updatePosition(): void {
-    if (!this.container) return;
-
-    const anchor = this.getAnchorElement();
-    if (!anchor) {
-      // Fall back to CSS defaults
-      this.container.style.top = '';
-      this.container.style.left = '';
-      this.container.style.bottom = '';
-      this.container.style.right = '';
-      return;
-    }
-
-    const rect = anchor.getBoundingClientRect();
-    const widgetRect = this.container.getBoundingClientRect();
-
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const margin = 16;
-
-    // Default: hug the bottom-right corner of the input, just outside it
-    let top = rect.bottom + window.scrollY - widgetRect.height - margin / 2;
-    let left = rect.right + window.scrollX - widgetRect.width - margin / 2;
-
-    // Perplexity has a very wide centered input. Anchor the Dock just to the right,
-    // vertically centered to feel \"attached\" to the bar on large screens.
-    if (this.site === 'perplexity') {
-      left = rect.right + window.scrollX + margin / 2;
-      top = rect.top + window.scrollY + rect.height / 2 - widgetRect.height / 2;
-    }
-
-    // Clamp within viewport so it never goes off-screen
-    const maxTop = window.scrollY + viewportHeight - widgetRect.height - margin;
-    const minTop = window.scrollY + margin;
-    const maxLeft = window.scrollX + viewportWidth - widgetRect.width - margin;
-
-    top = Math.min(Math.max(top, minTop), maxTop);
-    left = Math.min(left, maxLeft);
-
-    this.container.style.top = `${top}px`;
-    this.container.style.left = `${left}px`;
-    this.container.style.right = 'auto';
-    this.container.style.bottom = 'auto';
-  }
-
-  private async togglePanel(): Promise<void> {
-    if (this.isOpen) {
-      this.closePanel();
-    } else {
-      this.openPanel();
-    }
-  }
-
-  private async openPanel(): Promise<void> {
-    this.isOpen = true;
-    const panel = document.getElementById('context-dock-panel');
-    panel?.classList.remove('context-dock-hidden');
-    await this.loadProject();
-  }
-
-  private closePanel(): void {
-    this.isOpen = false;
-    const panel = document.getElementById('context-dock-panel');
-    panel?.classList.add('context-dock-hidden');
-  }
-
-  private async loadProject(): Promise<void> {
-    const content = document.getElementById('context-dock-content');
-    if (!content) return;
-
-    content.innerHTML = `
-      <div class="context-dock-empty">
-        ${ICONS.loader}
-        <p style="margin-top: 8px;">Loading...</p>
-      </div>
-    `;
-
-    try {
-      const result = await chrome.storage.local.get(['projects', 'activeProjectId']);
-      this.projects = (result.projects || []) as Project[];
-      this.activeProjectId = (result.activeProjectId as string | null) ?? null;
-
-      if (this.activeProjectId) {
-        this.project = this.projects.find((p) => p.id === this.activeProjectId) || null;
-      } else {
-        this.project = this.projects[0] ?? null;
-        this.activeProjectId = this.project?.id ?? null;
-      }
-
-      this.renderContent();
-    } catch (error) {
-      console.error('[Context Stash] Error loading project:', error);
-      content.innerHTML = `
-        <div class="context-dock-empty">
-          <p>Error loading project</p>
-          <p class="context-dock-subtext">Please try again</p>
-        </div>
-      `;
-    }
-  }
-
-  private renderContent(): void {
-    const content = document.getElementById('context-dock-content');
-    if (!content) return;
-
-    if (!this.project) {
-      content.innerHTML = `
-        <div class="context-dock-empty">
-          <p>No active project</p>
-          <p class="context-dock-subtext">Open Context Stash side panel to create or select a project.</p>
-        </div>
-      `;
-      return;
-    }
-
-    const snippetCount = this.project.snippets.length;
-    const preview = this.getPreviewText();
-
-    content.innerHTML = `
-      <div class="context-dock-project">
-        <div class="context-dock-project-main">
-          <span class="context-dock-status-dot"></span>
-          <span class="context-dock-project-name">
-            ${this.escapeHtml(this.project.name)}
-          </span>
-        </div>
-        ${
-          this.projects.length > 1
-            ? `
-          <div class="context-dock-project-switcher">
-            <button id="context-dock-project-toggle" class="context-dock-project-toggle" type="button">
-              <span class="context-dock-project-toggle-label">
-                ${this.escapeHtml(this.project.name)}
-              </span>
-              <span class="context-dock-project-toggle-chevron"></span>
-            </button>
-            <div id="context-dock-project-menu" class="context-dock-project-menu context-dock-hidden">
-              ${this.projects
-                .map(
-                  (p) => `
-                <button
-                  class="context-dock-project-menu-item ${
-                    p.id === this.activeProjectId ? 'active' : ''
-                  }"
-                  data-project-id="${p.id}"
-                  type="button"
-                >
-                  <span class="context-dock-project-menu-item-dot"></span>
-                  <span class="context-dock-project-menu-item-label">
-                    ${this.escapeHtml(p.name)}
-                  </span>
-                </button>`
-                )
-                .join('')}
-            </div>
-          </div>
-        `
-            : ''
-        }
-      </div>
-      <p class="context-dock-count">${snippetCount} snippet${snippetCount !== 1 ? 's' : ''} ready to inject</p>
-      ${snippetCount > 0 ? `<div class="context-dock-preview">${this.escapeHtml(preview)}</div>` : ''}
-      <button class="context-dock-inject" id="context-dock-inject-btn" ${snippetCount === 0 ? 'disabled' : ''}>
-        ${ICONS.folder}
-        Inject Context
-      </button>
-    `;
-
-    // Bind inject button
-    const injectBtn = document.getElementById('context-dock-inject-btn');
-    injectBtn?.addEventListener('click', () => this.handleInject());
-
-    // Bind project switcher (if present)
-    const toggle = document.getElementById('context-dock-project-toggle') as HTMLButtonElement | null;
-    const menu = document.getElementById('context-dock-project-menu') as HTMLDivElement | null;
-    if (toggle && menu) {
-      const closeMenu = () => {
-        menu.classList.add('context-dock-hidden');
-      };
-
-      toggle.addEventListener('click', (e) => {
-        e.stopPropagation();
-        menu.classList.toggle('context-dock-hidden');
-      });
-
-      // Click on a project
-      menu.querySelectorAll<HTMLButtonElement>('.context-dock-project-menu-item').forEach((item) => {
-        item.addEventListener('click', async (ev) => {
-          ev.stopPropagation();
-          const newId = item.getAttribute('data-project-id') ?? null;
-          this.activeProjectId = newId;
-          await chrome.storage.local.set({ activeProjectId: newId });
-          await this.loadProject();
-          const selectedProject = this.projects.find((p) => p.id === newId);
-          if (selectedProject) {
-            this.showToast(`Switched to project "${selectedProject.name}"`, 'success');
-          }
-          closeMenu();
-        });
-      });
-
-      // Close menu when clicking anywhere else inside the panel
-      const panel = document.getElementById('context-dock-panel');
-      panel?.addEventListener(
-        'click',
-        () => {
-          closeMenu();
-        },
-        { capture: true }
-      );
-    }
-  }
-
   private formatContext(project: Project): string {
     const lines: string[] = [];
 
@@ -707,355 +456,149 @@ class ContextStashWidget {
 
     project.snippets.forEach((snippet, index) => {
       const n = index + 1;
-      const label =
-        snippet.type === 'selection'
-          ? 'Selection'
-          : snippet.type === 'page_summary'
-          ? 'Page summary'
-          : 'Note';
+      const typeLabel =
+        snippet.type === 'selection' ? 'Selection' : 
+        snippet.type === 'page_summary' ? 'Page summary' : 'Note';
 
-      lines.push(`#### [${n}] ${label}`);
+      // --- LABEL LOGIC ---
+      // If a label exists, it appends " - **LabelName**"
+      const labelText = snippet.label ? ` - **${snippet.label}**` : '';
+      lines.push(`#### [${n}] ${typeLabel}${labelText}`);
 
       if (snippet.sourceTitle || snippet.sourceUrl) {
         const title = snippet.sourceTitle ?? 'Source';
         const url = snippet.sourceUrl ?? '';
-        if (url) {
-          lines.push(`- **Source**: [${title}](${url})`);
-        } else {
-          lines.push(`- **Source**: ${title}`);
-        }
+        lines.push(`- **Source**: ${url ? `[${title}](${url})` : title}`);
       }
 
-      const date = new Date(snippet.timestamp).toISOString();
-      lines.push(`- **Captured at**: ${date}`);
+      const date = new Date(snippet.timestamp).toISOString().split('T')[0];
+      lines.push(`- **Captured**: ${date}`);
       lines.push('');
       lines.push(snippet.content);
       lines.push('');
     });
 
     lines.push('---');
-    lines.push(
-      'Please treat these as background references: use them to ground your answer, quote or cite where helpful, and note if any references appear outdated or inconsistent.'
-    );
+    lines.push('Please treat these as background references.');
     lines.push('');
 
     return lines.join('\n');
   }
 
-  private getPreviewText(): string {
-    if (!this.project) return '';
-    const context = this.formatContext(this.project);
-    return context.length > 200 ? context.slice(0, 200) + '...' : context;
-  }
-
-  private escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
-  private setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
-    const valueSetter = Object.getOwnPropertyDescriptor(element, 'value')?.set;
-    const prototype = Object.getPrototypeOf(element);
-    const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-
-    if (valueSetter && valueSetter !== prototypeValueSetter) {
-      prototypeValueSetter?.call(element, value);
-    } else {
-      valueSetter?.call(element, value);
-    }
-
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-
+  /**
+   * Main Injection Logic
+   */
   private findAndInjectText(text: string): boolean {
-    const hostname = window.location.hostname;
-    console.log('[Context Stash] Attempting to inject into:', hostname);
+    console.log('[Context Stash] Attempting injection...');
 
-    // ChatGPT
-    if (hostname.includes('chatgpt.com') || hostname.includes('chat.openai.com')) {
-      const element = document.querySelector('#prompt-textarea') || 
-                      document.querySelector('textarea[data-id="root"]') || 
-                      document.querySelector('textarea');
-
-      if (element) {
-        // Handle ContentEditable (div or other)
-        if (element.getAttribute('contenteditable') === 'true') {
-            const el = element as HTMLElement;
-            const currentContent = el.innerText || '';
-            el.focus();
-            
-            // Try execCommand first as it handles React updates better for contenteditable
-            document.execCommand('selectAll', false);
-            document.execCommand('insertText', false, text + (currentContent ? '\n\n' + currentContent : ''));
-            
-            // Fallback if execCommand didn't work (e.g. empty text)
-            if (el.innerText === currentContent) {
-               el.innerText = text + (currentContent ? '\n\n' + currentContent : '');
-               el.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-            return true;
-        }
-        
-        // Handle Textarea
-        if (element instanceof HTMLTextAreaElement) {
-            const currentValue = element.value || '';
-            this.setNativeValue(element, text + (currentValue ? '\n\n' + currentValue : ''));
-            element.focus();
-            element.style.height = 'auto';
-            element.style.height = element.scrollHeight + 'px';
-            return true;
-        }
-      }
-    }
-
-    // Claude
-    if (hostname.includes('claude.ai')) {
-      console.log('[Context Stash] Detected Claude, searching for input...');
-      
-      // Try contenteditable first (Claude's main input)
-      const contentEditable = document.querySelector('div[contenteditable="true"]') as HTMLDivElement;
-      if (contentEditable) {
-        const currentContent = contentEditable.innerText || '';
-        const newContent = text + (currentContent ? '\n\n' + currentContent : '');
-        contentEditable.focus();
-        
-        // Use execCommand for better compatibility with contenteditable
-        document.execCommand('selectAll', false);
-        document.execCommand('insertText', false, newContent);
-        console.log('[Context Stash] Injected into Claude contenteditable');
-        return true;
-      }
-
-      // Fallback to textarea
-      const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
-      if (textarea) {
-        const currentValue = textarea.value || '';
-        this.setNativeValue(textarea, text + (currentValue ? '\n\n' + currentValue : ''));
-        textarea.focus();
-        console.log('[Context Stash] Injected into Claude textarea');
-        return true;
-      }
-    }
-
-    // Gemini
-    if (hostname.includes('gemini.google.com')) {
-      console.log('[Context Stash] Detected Gemini, searching for input...');
-      
-      // Gemini uses a contenteditable div with role="textbox"
-      const textbox = document.querySelector('[role="textbox"][contenteditable="true"]') as HTMLElement;
-      if (textbox) {
-        const currentContent = textbox.innerText || '';
-        textbox.focus();
-        document.execCommand('selectAll', false);
-        document.execCommand('insertText', false, text + (currentContent ? '\n\n' + currentContent : ''));
-        console.log('[Context Stash] Injected into Gemini textbox');
-        return true;
-      }
-      
-      // Fallback to regular textarea
-      const richTextarea = document.querySelector('rich-textarea textarea') as HTMLTextAreaElement;
-      const regularTextarea = document.querySelector('textarea') as HTMLTextAreaElement;
-      const textarea = richTextarea || regularTextarea;
-
-      if (textarea) {
-        const currentValue = textarea.value || '';
-        this.setNativeValue(textarea, text + (currentValue ? '\n\n' + currentValue : ''));
-        textarea.focus();
-        console.log('[Context Stash] Injected into Gemini textarea');
-        return true;
-      }
-    }
-
-    // Perplexity
-    if (hostname.includes('perplexity.ai')) {
-      console.log('[Context Stash] Detected Perplexity, searching for input...');
-      
-      // Perplexity uses a textarea inside a complex structure
-      // Try multiple approaches
-      const textareas = document.querySelectorAll('textarea');
-      console.log('[Context Stash] Found', textareas.length, 'textareas');
-      
-      for (const textarea of textareas) {
-        const ta = textarea as HTMLTextAreaElement;
-        // Check if it looks like the main input (has placeholder or is visible)
-        const placeholder = ta.placeholder || '';
-        const isVisible = ta.offsetParent !== null;
-        console.log('[Context Stash] Textarea:', { placeholder, isVisible, value: ta.value?.slice(0, 50) });
-        
-        if (isVisible && (placeholder.toLowerCase().includes('ask') || placeholder.toLowerCase().includes('anything') || placeholder.toLowerCase().includes('follow'))) {
-          const currentValue = ta.value || '';
-          this.setNativeValue(ta, text + (currentValue ? '\n\n' + currentValue : ''));
-          ta.focus();
-          // Trigger additional events that Perplexity might need
-          ta.dispatchEvent(new Event('change', { bubbles: true }));
-          ta.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
-          console.log('[Context Stash] Successfully injected into Perplexity textarea');
-          return true;
-        }
-      }
-      
-      // Fallback: try the first visible textarea
-      for (const textarea of textareas) {
-        const ta = textarea as HTMLTextAreaElement;
-        if (ta.offsetParent !== null) {
-          const currentValue = ta.value || '';
-          this.setNativeValue(ta, text + (currentValue ? '\n\n' + currentValue : ''));
-          ta.focus();
-          ta.dispatchEvent(new Event('change', { bubbles: true }));
-          console.log('[Context Stash] Injected into first visible Perplexity textarea');
-          return true;
-        }
-      }
-      
-      // Try contenteditable
-      const editables = document.querySelectorAll('[contenteditable="true"]');
-      console.log('[Context Stash] Found', editables.length, 'contenteditable elements');
-      for (const editable of editables) {
-        const el = editable as HTMLElement;
-        if (el.offsetParent !== null && el.offsetHeight > 20) {
-          const currentContent = el.innerText || '';
-          el.focus();
-          document.execCommand('selectAll', false);
-          document.execCommand('insertText', false, text + (currentContent ? '\n\n' + currentContent : ''));
-          console.log('[Context Stash] Injected into Perplexity contenteditable');
-          return true;
-        }
-      }
-    }
-
-    // Fallback: try any textarea or contenteditable
-    const anyTextarea = document.querySelector('textarea:not([readonly])') as HTMLTextAreaElement;
-    if (anyTextarea) {
-      const currentValue = anyTextarea.value || '';
-      this.setNativeValue(anyTextarea, text + (currentValue ? '\n\n' + currentValue : ''));
-      anyTextarea.focus();
-      return true;
-    }
+    // 1. Try ContentEditable (Claude, Gemini, Modern ChatGPT)
+    const editableSelectors = [
+      '#prompt-textarea', // ChatGPT specific
+      '[contenteditable="true"][role="textbox"]',
+      'div[contenteditable="true"]',
+      '.ProseMirror'
+    ];
     
-    // Try contenteditable elements
-    const editables = document.querySelectorAll('[contenteditable="true"]');
-    for (const editable of editables) {
-      const el = editable as HTMLElement;
-      // Skip if it's a tiny element (likely not the main input)
-      if (el.offsetHeight < 20) continue;
-      
-      const currentContent = el.innerText || '';
-      el.focus();
-      document.execCommand('selectAll', false);
-      document.execCommand('insertText', false, text + (currentContent ? '\n\n' + currentContent : ''));
-      return true;
+    for (const sel of editableSelectors) {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      if (el && el.offsetParent !== null) { // Check visibility
+        console.log(`[Context Stash] Found ContentEditable: ${sel}`);
+        const prefix = el.innerText.trim().length > 0 ? '\n\n' : '';
+        return insertIntoContentEditable(el, prefix + text);
+      }
     }
 
+    // 2. Try Standard/React Textarea (Perplexity, Legacy Inputs)
+    const textareaSelectors = ['textarea:not([readonly])', 'textarea'];
+    for (const sel of textareaSelectors) {
+      const el = document.querySelector(sel) as HTMLTextAreaElement | null;
+      if (el && el.offsetParent !== null) {
+         console.log(`[Context Stash] Found Textarea: ${sel}`);
+         const prefix = el.value.trim().length > 0 ? '\n\n' : '';
+         return setReactTextarea(el, el.value + prefix + text);
+      }
+    }
+
+    console.warn('[Context Stash] No suitable input field found.');
     return false;
   }
 
-  private async handleInject(): Promise<void> {
-    if (!this.project || this.project.snippets.length === 0) return;
-
-    const injectBtn = document.getElementById('context-dock-inject-btn');
-    if (injectBtn) {
-      injectBtn.innerHTML = `${ICONS.loader} Injecting...`;
-      (injectBtn as HTMLButtonElement).disabled = true;
-    }
-
-    try {
-      const contextText = this.formatContext(this.project);
-      const success = this.findAndInjectText(contextText);
-
-      if (success) {
-        this.closePanel();
-        this.showToast('Context injected successfully!', 'success');
-      } else {
-        this.showToast('Could not find chat input', 'error');
-      }
-    } catch (error) {
-      console.error('[Context Stash] Injection error:', error);
-      this.showToast('Failed to inject context', 'error');
-    } finally {
-      if (injectBtn) {
-        injectBtn.innerHTML = `${ICONS.folder} Inject Context`;
-        (injectBtn as HTMLButtonElement).disabled = false;
-      }
-    }
-  }
-
   /**
-   * Used when the user triggers \"Paste Context from Context Dock\" via
-   * the right-click menu on an editable field.
+   * Called via Message from Background Script
    */
-  private async injectFromContextMenu(projectId?: string): Promise<void> {
+  public async injectContextFromMenu(projectId?: string): Promise<void> {
     try {
+      // Fetch Data
       const result = await chrome.storage.local.get(['projects', 'activeProjectId']);
       const projects = (result.projects || []) as Project[];
       const activeProjectId = (result.activeProjectId as string | null) ?? null;
-
       const idToUse = projectId ?? activeProjectId;
+      
       const project = projects.find((p) => p.id === idToUse);
+      
       if (!project || project.snippets.length === 0) {
-        this.showToast('No context available in the selected project', 'error');
+        this.showToast('Project is empty or not found', 'error');
         return;
       }
 
       const contextText = this.formatContext(project);
-      const success = this.findAndInjectText(contextText);
+      
+      // Attempt Auto-Injection
+      const injected = this.findAndInjectText(contextText);
 
-      if (success) {
-        this.showToast('Context pasted from Context Stash', 'success');
+      if (injected) {
+        this.showToast('Context pasted successfully!', 'success');
       } else {
-        this.showToast('Could not find chat input to paste into', 'error');
+        // Fallback: Copy to Clipboard
+        await navigator.clipboard.writeText(contextText);
+        this.showToast('Input not found. Copied to Clipboard!', 'success');
       }
+
     } catch (error) {
-      console.error('[Context Stash] injectFromContextMenu error:', error);
-      this.showToast('Failed to paste context', 'error');
+      console.error('[Context Stash] Injection error:', error);
+      this.showToast('Error pasting context', 'error');
     }
   }
 
   private showToast(message: string, type: 'success' | 'error'): void {
     const toast = document.createElement('div');
-    toast.style.cssText = `
-      position: fixed;
-      bottom: 160px;
-      right: 24px;
-      background: ${type === 'success' ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : '#dc2626'};
-      color: white;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 13px;
-      z-index: 2147483647;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.25);
-      animation: contextDockSlideUp 0.3s ease-out;
-    `;
-    toast.textContent = `${type === 'success' ? '✓' : '✕'} ${message}`;
+    toast.className = `context-stash-toast ${type}`;
+    toast.innerHTML = `<span>${type === 'success' ? '✓' : '✕'}</span> ${message}`;
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2500);
+    setTimeout(() => toast.remove(), 3000);
   }
 }
 
-// Initialize widget when DOM is ready
+// --- INITIALIZATION ---
+
+let contextStashWidget: ContextStashWidget | null = null;
+
 function initContextStash(): void {
-  // Don't initialize if already exists
-  if (document.getElementById('context-dock-widget')) {
-    return;
-  }
+  if (contextStashWidget) return;
+  // Cleanup old instances if DOM reloaded
+  const existing = document.getElementById('context-dock-widget');
+  if (existing) existing.remove();
+  
+  contextStashWidget = new ContextStashWidget();
+}
 
-  const widget = new ContextStashWidget();
-
-  // Listen for background requests to inject context (right-click menu on editable fields)
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type === 'INJECT_CONTEXT_FROM_MENU') {
-      widget['injectFromContextMenu']?.(message.projectId);
+// Listen for messages
+chrome.runtime.onMessage.addListener(async (message) => {
+  if (message?.type === 'INJECT_CONTEXT_FROM_MENU') {
+    if (!contextStashWidget) initContextStash();
+    if (contextStashWidget) {
+      await contextStashWidget.injectContextFromMenu(message.projectId);
     }
-  });
-}
+  }
+});
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initContextStash);
-} else {
-  initContextStash();
-}
+// Run immediately
+initContextStash();
 
-// Also try to initialize after a short delay for SPAs
-setTimeout(initContextStash, 1000);
-
+// Re-run if DOM changes significantly (SPA navigation)
+const observer = new MutationObserver(() => {
+  if (!document.getElementById('context-dock-styles') && !contextStashWidget) {
+    initContextStash();
+  }
+});
+observer.observe(document.body, { childList: true, subtree: true });

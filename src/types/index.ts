@@ -2,6 +2,7 @@ export interface Snippet {
   id: string;
   type: 'selection' | 'page_summary' | 'note';
   content: string;
+  label?: string;
   sourceUrl?: string;
   sourceTitle?: string;
   timestamp: number;
