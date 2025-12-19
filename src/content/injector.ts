@@ -329,6 +329,44 @@ const STYLES = `
   .context-dock-hidden {
     display: none !important;
   }
+  /* Toast Notifications */
+  .context-stash-toast {
+    position: fixed;
+    bottom: 40px;
+    right: 24px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    color: white;
+    z-index: 2147483647;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+    animation: contextDockSlideUp 0.3s ease-out;
+    transition: opacity 0.3s ease;
+  }
+
+  .context-stash-toast.success {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .context-stash-toast.error {
+    background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .context-stash-toast-icon {
+    font-size: 16px;
+  }
+  @keyframes contextDockSlideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
 `;
 
 function setReactTextarea(el: HTMLTextAreaElement, value: string): boolean {
@@ -471,7 +509,7 @@ class ContextStashWidget {
         lines.push(`- **Source**: ${url ? `[${title}](${url})` : title}`);
       }
 
-      const date = new Date(snippet.timestamp).toISOString().split('T')[0];
+      const date = new Date(snippet.timestamp).toLocaleDateString();
       lines.push(`- **Captured**: ${date}`);
       lines.push('');
       lines.push(snippet.content);
@@ -488,41 +526,86 @@ class ContextStashWidget {
   /**
    * Main Injection Logic
    */
-  private findAndInjectText(text: string): boolean {
-    console.log('[Context Stash] Attempting injection...');
+  // Replace the findAndInjectText method in src/content/injector.ts
 
-    // 1. Try ContentEditable (Claude, Gemini, Modern ChatGPT)
-    const editableSelectors = [
-      '#prompt-textarea', // ChatGPT specific
-      '[contenteditable="true"][role="textbox"]',
-      'div[contenteditable="true"]',
-      '.ProseMirror'
-    ];
-    
-    for (const sel of editableSelectors) {
-      const el = document.querySelector(sel) as HTMLElement | null;
-      if (el && el.offsetParent !== null) { // Check visibility
-        console.log(`[Context Stash] Found ContentEditable: ${sel}`);
-        const prefix = el.innerText.trim().length > 0 ? '\n\n' : '';
-        return insertIntoContentEditable(el, prefix + text);
-      }
-    }
-
-    // 2. Try Standard/React Textarea (Perplexity, Legacy Inputs)
-    const textareaSelectors = ['textarea:not([readonly])', 'textarea'];
-    for (const sel of textareaSelectors) {
-      const el = document.querySelector(sel) as HTMLTextAreaElement | null;
-      if (el && el.offsetParent !== null) {
-         console.log(`[Context Stash] Found Textarea: ${sel}`);
-         const prefix = el.value.trim().length > 0 ? '\n\n' : '';
-         return setReactTextarea(el, el.value + prefix + text);
-      }
-    }
-
-    console.warn('[Context Stash] No suitable input field found.');
-    return false;
+private findAndInjectText(text: string): boolean {
+  // 1. Use the class property 'this.site' which was set during init()
+  const selectors: string[] = [];
+  
+  switch (this.site) {
+    case 'chatgpt':
+      selectors.push('#prompt-textarea', '[contenteditable="true"]', 'textarea[data-id="root"]');
+      break;
+    case 'claude':
+      selectors.push('div[contenteditable="true"]', 'textarea[placeholder*="Claude"]');
+      break;
+    case 'perplexity':
+      selectors.push('textarea[placeholder*="Ask"]', 'textarea', '[contenteditable="true"]');
+      break;
+    case 'gemini':
+      selectors.push('[role="textbox"][contenteditable="true"]', 'rich-textarea textarea', 'textarea');
+      break;
+    default:
+      // Generic fallbacks for unknown sites
+      selectors.push('textarea:not([readonly])', '[contenteditable="true"]', '[role="textbox"]');
+      break;
   }
 
+  // 2. Find the visible element
+  let element: HTMLElement | null = null;
+  for (const selector of selectors) {
+    const found = document.querySelector(selector) as HTMLElement;
+    if (found && found.offsetParent !== null) {
+      element = found;
+      break;
+    }
+  }
+
+  if (!element) return false;
+
+  try {
+    element.focus();
+
+    // 3. Try to insert via execCommand (Best for framework-based editors like ChatGPT/Claude)
+    const isContentEditable = element.getAttribute('contenteditable') === 'true' || element.tagName !== 'TEXTAREA';
+    
+    if (isContentEditable) {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      
+      const success = document.execCommand('insertText', false, text);
+      if (success) return true;
+    }
+
+    // 4. Fallback for standard Textareas
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+      const target = element as HTMLTextAreaElement;
+      const valueSetter = Object.getOwnPropertyDescriptor(target, 'value')?.set;
+      const prototype = Object.getPrototypeOf(target);
+      const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+
+      const fullText = text + (target.value ? '\n\n' + target.value : '');
+
+      if (prototypeValueSetter && valueSetter !== prototypeValueSetter) {
+        prototypeValueSetter.call(target, fullText);
+      } else {
+        target.value = fullText;
+      }
+      
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    } 
+    
+    return false;
+  } catch (err) {
+    console.error('[Context Stash] Injection failed:', err);
+    return false;
+  }
+}
   /**
    * Called via Message from Background Script
    */
@@ -561,12 +644,30 @@ class ContextStashWidget {
   }
 
   private showToast(message: string, type: 'success' | 'error'): void {
-    const toast = document.createElement('div');
-    toast.className = `context-stash-toast ${type}`;
-    toast.innerHTML = `<span>${type === 'success' ? '✓' : '✕'}</span> ${message}`;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
-  }
+  // Remove existing toasts to prevent stacking
+  const existingToasts = document.querySelectorAll('.context-stash-toast');
+  existingToasts.forEach(t => t.remove());
+
+  const toast = document.createElement('div');
+  
+  // Apply the base class and the specific type class
+  toast.className = `context-stash-toast ${type}`;
+  
+  const icon = type === 'success' ? '✓' : '✕';
+  
+  toast.innerHTML = `
+    <span class="context-stash-toast-icon">${icon}</span>
+    <span class="context-stash-toast-message">${message}</span>
+  `;
+  
+  document.body.appendChild(toast);
+
+  // Animate out and remove
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
 }
 
 // --- INITIALIZATION ---

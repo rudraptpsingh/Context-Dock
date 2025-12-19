@@ -289,8 +289,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
     if (!tab?.id || !targetProjectId) return;
 
-    console.log('[Context Stash][background] Paste context menu clicked', { menuItemId: info.menuItemId, targetProjectId, tabId: tab.id });
-
     // Ask the content script in this tab to inject the given project's context
     chrome.tabs
       .sendMessage(tab.id, { type: 'INJECT_CONTEXT_FROM_MENU', projectId: targetProjectId })
@@ -306,7 +304,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'SAVE_SELECTION_WITH_LABEL') {
     (async () => {
-      console.log('[Context Stash][background] SAVE_SELECTION_WITH_LABEL received', { projectId: message.projectId, label: message.label, length: message.content?.length });
       await addSnippetToProject(message.projectId, {
         type: 'selection',
         content: message.content,
@@ -359,7 +356,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'PAGE_CONTENT') {
     (async () => {
-      console.log('[Context Stash][background] PAGE_CONTENT received', { title: message.title, url: message.url, length: message.content?.length });
       const activeProjectId = await getActiveProjectId();
       if (!activeProjectId) {
         sendResponse({ success: false, error: 'No active project' });
@@ -381,7 +377,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'CREATE_PROJECT_AND_SAVE') {
     (async () => {
-      console.log('[Context Stash][background] CREATE_PROJECT_AND_SAVE received', { name: message.name, length: message.content?.length });
       const newProject = await addProject(message.name);
       await addSnippetToProject(newProject.id, {
         type: 'selection',

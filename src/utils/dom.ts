@@ -48,33 +48,37 @@ export function findChatInput(): HTMLTextAreaElement | HTMLInputElement | null {
  * Insert text into the chat input, handling both textarea and contenteditable elements
  */
 export function insertTextIntoChat(text: string): boolean {
-  const input = findChatInput();
+  const hostname = window.location.hostname;
   
-  if (!input) {
-    console.error('[Context Dock] Could not find chat input');
-    return false;
-  }
+  // Find the primary input based on platform
+  let selector = 'textarea:not([readonly]), [contenteditable="true"]';
+  if (hostname.includes('chatgpt.com')) selector = '#prompt-textarea';
+  if (hostname.includes('claude.ai')) selector = 'div[contenteditable="true"]';
+  if (hostname.includes('gemini.google.com')) selector = '[role="textbox"]';
+
+  const input = document.querySelector(selector) as HTMLElement;
   
-  // Handle contenteditable (Claude uses this)
-  if (input instanceof HTMLDivElement && input.contentEditable === 'true') {
-    const currentContent = input.innerText || '';
-    input.innerText = text + (currentContent ? '\n\n' + currentContent : '');
+  if (!input) return false;
+
+  input.focus();
+  
+  // Use the Clipboard API + execCommand for the most reliable "natural" insertion
+  // which forces the AI apps to register the content.
+  try {
+    document.execCommand('insertText', false, text);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  } catch (e) {
+    // Manual fallback
+    if (input instanceof HTMLTextAreaElement) {
+        input.value = text + '\n\n' + input.value;
+    } else {
+        input.innerText = text + '\n\n' + input.innerText;
+    }
     input.dispatchEvent(new Event('input', { bubbles: true }));
     return true;
   }
-  
-  // Handle textarea/input
-  if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
-    const currentValue = input.value || '';
-    const newValue = text + (currentValue ? '\n\n' + currentValue : '');
-    setNativeValue(input, newValue);
-    input.focus();
-    return true;
-  }
-  
-  return false;
 }
-
 /**
  * Get favicon URL for a given page URL
  */
