@@ -4,7 +4,9 @@ import Header from './components/Header';
 import SnippetList from './components/SnippetList';
 import EmptyState from './components/EmptyState';
 import CreateProjectModal from './components/CreateProjectModal';
+import EditSnippetModal from './components/EditSnippetModal';
 import { useProjects } from './hooks/useProjects';
+import { Snippet } from '../types';
 
 export default function App() {
   const {
@@ -17,9 +19,11 @@ export default function App() {
     setActiveProjectId,
     deleteSnippet,
     addSnippetToActive,
+    updateSnippet,
   } = useProjects();
 
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
 
   const handleCreateProject = async (name: string) => {
     try {
@@ -51,6 +55,17 @@ export default function App() {
       toast.success('Snippet deleted');
     } catch (error) {
       toast.error('Failed to delete snippet');
+    }
+  };
+
+  const handleEditSnippet = async (label: string | undefined, content: string) => {
+    if (!activeProjectId || !editingSnippet) return;
+    try {
+      await updateSnippet(activeProjectId, editingSnippet.id, { label, content });
+      toast.success('Snippet updated');
+      setEditingSnippet(null);
+    } catch (error) {
+      toast.error('Failed to update snippet');
     }
   };
 
@@ -164,6 +179,7 @@ export default function App() {
           <SnippetList
             snippets={activeProject.snippets}
             onDelete={handleDeleteSnippet}
+            onEdit={setEditingSnippet}
           />
         )}
       </main>
@@ -172,6 +188,14 @@ export default function App() {
         <CreateProjectModal
           onSubmit={handleCreateProject}
           onClose={() => setShowCreateModal(false)}
+        />
+      )}
+
+      {editingSnippet && (
+        <EditSnippetModal
+          snippet={editingSnippet}
+          onSave={handleEditSnippet}
+          onClose={() => setEditingSnippet(null)}
         />
       )}
     </div>

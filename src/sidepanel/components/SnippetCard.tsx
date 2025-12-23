@@ -1,4 +1,4 @@
-import { Trash2, FileText, Quote, StickyNote, Copy } from 'lucide-react';
+import { Trash2, FileText, Quote, StickyNote, Copy, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { Snippet } from '../../types';
 import { getFaviconUrl } from '../../utils/dom';
@@ -6,6 +6,7 @@ import { getFaviconUrl } from '../../utils/dom';
 interface SnippetCardProps {
   snippet: Snippet;
   onDelete: () => void;
+  onEdit: () => void;
 }
 
 const typeIcons = {
@@ -14,7 +15,7 @@ const typeIcons = {
   note: StickyNote,
 };
 
-export default function SnippetCard({ snippet, onDelete }: SnippetCardProps) {
+export default function SnippetCard({ snippet, onDelete, onEdit }: SnippetCardProps) {
   const Icon = typeIcons[snippet.type];
   const faviconUrl = snippet.sourceUrl ? getFaviconUrl(snippet.sourceUrl) : null;
 
@@ -75,6 +76,13 @@ export default function SnippetCard({ snippet, onDelete }: SnippetCardProps) {
         {/* Actions (Hidden by default, shown on hover) */}
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button 
+            onClick={onEdit}
+            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-white rounded-md shadow-sm ring-1 ring-slate-200 transition-all"
+            title="Edit"
+          >
+            <Pencil className="w-3 h-3" />
+          </button>
+          <button 
             onClick={handleCopy}
             className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-white rounded-md shadow-sm ring-1 ring-slate-200 transition-all"
             title="Copy"
@@ -93,7 +101,14 @@ export default function SnippetCard({ snippet, onDelete }: SnippetCardProps) {
 
       {/* Content */}
       <div className="text-sm text-slate-600 leading-relaxed break-words line-clamp-4 group-hover:line-clamp-none transition-all">
-        {snippet.content}
+        {snippet.label && (
+          <div className="mb-2 inline-block px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded border border-blue-200">
+            {snippet.label}
+          </div>
+        )}
+        <div className={snippet.label ? 'mt-2' : ''}>
+          {snippet.content}
+        </div>
       </div>
     </div>
   );

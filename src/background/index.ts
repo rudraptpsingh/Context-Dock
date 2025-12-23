@@ -169,7 +169,26 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       return;
     }
 
-    await saveSelectionToProject(targetProjectId, info.selectionText, tab);
+    // Prompt user for a label
+    if (tab?.id) {
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (text, projectId) => {
+          const label = prompt('Enter a label for this context:', '');
+          if (label !== null) {  // User didn't cancel
+            chrome.runtime.sendMessage({
+              type: 'SAVE_SELECTION_WITH_LABEL',
+              projectId,
+              content: text,
+              label: label || undefined,
+              url: window.location.href,
+              title: document.title
+            });
+          }
+        },
+        args: [info.selectionText, targetProjectId]
+      });
+    }
   }
 
   // 3. HANDLE CLIP PAGE
@@ -280,57 +299,61 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 // Helper to save selection and notify
-async function saveSelectionToProject(projectId: string, text: string, tab?: chrome.tabs.Tab) {
-  await addSnippetToProject(projectId, {
-    type: 'selection',
-    content: text,
-    sourceUrl: tab?.url,
-    sourceTitle: tab?.title,
-  });
-
-  // Notify side panel to refresh
-  chrome.runtime.sendMessage({ type: 'REFRESH_DATA' }).catch(() => {});
-
-  // Show success notification in page
-  if (tab?.id) {
-    chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: (text: string) => {
-        const toast = document.createElement('div');
-        toast.innerHTML = `
-          <div style="
-            position: fixed;
-            bottom: 24px;
-            right: 24px;
-            background: #0f172a;
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            font-family: Inter, system-ui, sans-serif;
-            font-size: 14px;
-            z-index: 999999;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            animation: slideIn 0.3s ease-out;
-          ">
-            ✓ Saved "${text.slice(0, 30)}${text.length > 30 ? '...' : ''}" to Context Stash
-          </div>
-          <style>
-            @keyframes slideIn {
-              from { transform: translateY(20px); opacity: 0; }
-              to { transform: translateY(0); opacity: 1; }
-            }
-          </style>
-        `;
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 3000);
-      },
-      args: [text],
-    });
-  }
-}
 
 // Handle messages from content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'SAVE_SELECTION_WITH_LABEL') {
+    (async () => {
+      await addSnippetToProject(message.projectId, {
+        type: 'selection',
+        content: message.content,
+        label: message.label,
+        sourceUrl: message.url,
+        sourceTitle: message.title
+      });
+
+      chrome.runtime.sendMessage({ type: 'REFRESH_DATA' }).catch(() => {});
+
+      // Show success notification
+      if (sender.tab?.id) {
+        chrome.scripting.executeScript({
+          target: { tabId: sender.tab.id },
+          func: (content: string, label: string | undefined) => {
+            const toast = document.createElement('div');
+            const labelText = label ? ` [${label}]` : '';
+            toast.innerHTML = `
+              <div style="
+                position: fixed;
+                bottom: 24px;
+                right: 24px;
+                background: #0f172a;
+                color: white;
+                padding: 12px 20px;
+                border-radius: 8px;
+                font-family: Inter, system-ui, sans-serif;
+                font-size: 14px;
+                z-index: 999999;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                animation: slideIn 0.3s ease-out;
+              ">
+                ✓ Saved "${content.slice(0, 25)}${content.length > 25 ? '...' : ''}"${labelText} to Context Stash
+              </div>
+              <style>
+                @keyframes slideIn {
+                  from { transform: translateY(20px); opacity: 0; }
+                  to { transform: translateY(0); opacity: 1; }
+                }
+              </style>
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+          },
+          args: [message.content, message.label]
+        });
+      }
+    })();
+  }
+
   if (message.type === 'PAGE_CONTENT') {
     (async () => {
       const activeProjectId = await getActiveProjectId();

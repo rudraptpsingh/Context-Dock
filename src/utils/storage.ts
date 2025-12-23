@@ -102,6 +102,22 @@ export async function deleteSnippet(projectId: string, snippetId: string): Promi
   await setProjects(projects);
 }
 
+export async function updateSnippet(projectId: string, snippetId: string, updates: Partial<Omit<Snippet, 'id' | 'timestamp'>>): Promise<void> {
+  const projects = await getProjects();
+  const projectIndex = projects.findIndex(p => p.id === projectId);
+  if (projectIndex === -1) return;
+  
+  const snippetIndex = projects[projectIndex].snippets.findIndex(s => s.id === snippetId);
+  if (snippetIndex === -1) return;
+  
+  projects[projectIndex].snippets[snippetIndex] = {
+    ...projects[projectIndex].snippets[snippetIndex],
+    ...updates
+  };
+  
+  await setProjects(projects);
+}
+
 export async function addSnippetToActiveProject(snippet: Omit<Snippet, 'id' | 'timestamp'>): Promise<Snippet | null> {
   const activeId = await getActiveProjectId();
   if (!activeId) return null;
