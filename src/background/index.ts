@@ -418,3 +418,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+// ADD LISTENER TO SHOW OPTIONS TO PASTE SELECTIVE CONTEXT
+chrome.commands.onCommand.addListener(async (command) => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+
+  if (command === 'paste-active-context') {
+    // Falls back to active project in content script
+    chrome.tabs.sendMessage(tab.id, { type: 'INJECT_CONTEXT_FROM_MENU' });
+  } else if (command === 'paste-selective-context') {
+    // Triggers picker
+    chrome.tabs.sendMessage(tab.id, { type: 'SHOW_SNIPPET_PICKER' });
+  }
+});
