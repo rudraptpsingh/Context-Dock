@@ -728,8 +728,8 @@ chrome.runtime.onMessage.addListener((message) => {
 // --- PICKER RENDERER ---
 async function renderSnippetPicker() {
   const result = await chrome.storage.local.get(['projects', 'activeProjectId']);
-  const projects = result.projects || [];
-  const activeProject = projects.find((p: any) => p.id === result.activeProjectId);
+  const projects = (result.projects || []) as Project[];
+  const activeProject = projects.find((p) => p.id === result.activeProjectId);
   
   if (!activeProject || !activeProject.snippets || activeProject.snippets.length === 0) {
     // Show a toast error using the widget if possible, or alert
@@ -756,7 +756,7 @@ async function renderSnippetPicker() {
 
   const list = windowEl.querySelector('#cs-picker-list');
   
-  activeProject.snippets.forEach((snippet: any) => {
+  activeProject.snippets.forEach((snippet) => {
     const item = document.createElement('div');
     item.className = 'cs-picker-item';
     
@@ -787,12 +787,19 @@ async function renderSnippetPicker() {
     };
     list?.appendChild(item);
   });
+  
 
-  const closePicker = () => overlay.remove();
+    function closePicker() {
+    overlay.remove();
+    document.removeEventListener('keydown', handleEsc);
+  }
+  function handleEsc(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      closePicker();
+    }
+  }
   windowEl.querySelector('#cs-close-picker')?.addEventListener('click', closePicker);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closePicker(); });
-  
-  const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') { closePicker(); document.removeEventListener('keydown', handleEsc); } };
   document.addEventListener('keydown', handleEsc);
 }
 
