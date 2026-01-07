@@ -367,6 +367,29 @@ const STYLES = `
     from { transform: translateY(20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }
+  .context-picker-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(2px);
+    z-index: 2147483647;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .context-picker-window {
+    background: white; width: 400px; max-height: 500px;
+    border-radius: 12px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2);
+    display: flex; flex-direction: column; overflow: hidden;
+    border: 1px solid #e2e8f0;
+  }
+  .picker-item {
+    padding: 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer;
+    transition: background 0.2s;
+  }
+  .picker-item:hover { background: #f8fafc; }
+  .picker-item-text { 
+    font-size: 13px; color: #334155; 
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
 `;
 
 function setReactTextarea(el: HTMLTextAreaElement, value: string): boolean {
@@ -528,7 +551,7 @@ class ContextStashWidget {
    */
   // Replace the findAndInjectText method in src/content/injector.ts
 
-private findAndInjectText(text: string): boolean {
+public findAndInjectText(text: string): boolean {
   // 1. Use the class property 'this.site' which was set during init()
   const selectors: string[] = [];
   
@@ -683,15 +706,103 @@ function initContextStash(): void {
   contextStashWidget = new ContextStashWidget();
 }
 
-// Listen for messages
-chrome.runtime.onMessage.addListener(async (message) => {
-  if (message?.type === 'INJECT_CONTEXT_FROM_MENU') {
-    if (!contextStashWidget) initContextStash();
+// --- CONSOLIDATED MESSAGE LISTENER ---
+chrome.runtime.onMessage.addListener((message) => {
+  // Ensure widget is initialized
+  if (!contextStashWidget) initContextStash();
+
+  if (message.type === 'INJECT_CONTEXT_FROM_MENU') {
     if (contextStashWidget) {
-      await contextStashWidget.injectContextFromMenu(message.projectId);
+      contextStashWidget.injectContextFromMenu(message.projectId);
     }
+    return true;
+  }
+
+  if (message.type === 'SHOW_SNIPPET_PICKER') {
+    if (document.querySelector('.cs-picker-overlay')) return true;
+    renderSnippetPicker();
+    return true;
   }
 });
+
+// --- PICKER RENDERER ---
+async function renderSnippetPicker() {
+  const result = await chrome.storage.local.get(['projects', 'activeProjectId']);
+  const projects = (result.projects || []) as Project[];
+  const activeProject = projects.find((p) => p.id === result.activeProjectId);
+  
+  if (!activeProject || !activeProject.snippets || activeProject.snippets.length === 0) {
+    // Show a toast error using the widget if possible, or alert
+    alert('Context Stash: No snippets found in active project.');
+    return;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'cs-picker-overlay';
+  
+  const windowEl = document.createElement('div');
+  windowEl.className = 'cs-picker-window';
+
+  windowEl.innerHTML = `
+    <div style="padding: 16px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: space-between; align-items: center;">
+      <div style="font-weight: 600; font-size: 15px; color: #0f172a;">Select Snippet to Paste</div>
+      <button id="cs-close-picker" style="border:none; background:none; cursor:pointer; font-size: 20px; color: #94a3b8; line-height: 1;">&times;</button>
+    </div>
+    <div id="cs-picker-list" style="overflow-y: auto; flex: 1; background: white;"></div>
+  `;
+
+  overlay.appendChild(windowEl);
+  document.body.appendChild(overlay);
+
+  const list = windowEl.querySelector('#cs-picker-list');
+  
+  activeProject.snippets.forEach((snippet) => {
+    const item = document.createElement('div');
+    item.className = 'cs-picker-item';
+    
+    const typeLabel = document.createElement('div');
+    typeLabel.style.cssText = 'font-size: 10px; color: #3b82f6; font-weight: 700; text-transform: uppercase; margin-bottom: 4px;';
+    typeLabel.textContent = snippet.type.replace('_', ' ');
+
+    const contentPreview = document.createElement('div');
+    contentPreview.style.cssText = 'font-size: 13px; color: #334155; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;';
+    contentPreview.textContent = snippet.content;
+
+    item.appendChild(typeLabel);
+    item.appendChild(contentPreview);
+
+    item.onclick = () => {
+      // Format the single snippet
+      const formatted = `### Reference: ${snippet.sourceTitle || 'Note'}\n\n${snippet.content}`;
+      
+      if (contextStashWidget) {
+        // Now calling the public method directly
+        const success = contextStashWidget.findAndInjectText(formatted);
+        if(!success) {
+           navigator.clipboard.writeText(formatted);
+           alert("Could not find chat input. Copied to clipboard.");
+        }
+      }
+      overlay.remove();
+    };
+    list?.appendChild(item);
+  });
+  
+
+    function closePicker() {
+    overlay.remove();
+    document.removeEventListener('keydown', handleEsc);
+  }
+  function handleEsc(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      closePicker();
+    }
+  }
+  windowEl.querySelector('#cs-close-picker')?.addEventListener('click', closePicker);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closePicker(); });
+  document.addEventListener('keydown', handleEsc);
+}
+
 
 // Run immediately
 initContextStash();

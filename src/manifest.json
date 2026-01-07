@@ -44,5 +44,21 @@
   ],
   "host_permissions": [
     "<all_urls>"
-  ]
+  ],
+  "commands": {
+    "paste-active-context": {
+      "suggested_key": {
+        "default": "Alt+Shift+V",
+        "mac": "Command+Shift+V"
+      },
+      "description": "Paste active project context into chatbox"
+    },
+    "paste-selective-context": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Open snippet picker to paste specific context"
+    }
+  }
 }
