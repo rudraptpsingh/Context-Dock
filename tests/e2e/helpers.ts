@@ -52,6 +52,26 @@ export async function mockChatGPT(context: BrowserContext, body: string) {
   });
 }
 
+/**
+ * Routes any chat domain via `routes`. Each entry: { hostPattern, urlMatch, body }.
+ * Anything that doesn't match urlMatch on a known host returns a 404.
+ */
+export async function mockHosts(
+  context: BrowserContext,
+  routes: Array<{ hostPattern: string; urlMatch: RegExp; body: string }>,
+) {
+  for (const r of routes) {
+    await context.route(r.hostPattern, async route => {
+      const url = route.request().url();
+      if (r.urlMatch.test(url)) {
+        await route.fulfill({ status: 200, contentType: 'text/html', body: r.body });
+      } else {
+        await route.fulfill({ status: 404, body: '' });
+      }
+    });
+  }
+}
+
 export interface PartialConversation {
   id: string;
   platform: string;

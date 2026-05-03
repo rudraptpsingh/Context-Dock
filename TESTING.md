@@ -59,6 +59,28 @@ and to test against the same Chrome the user actually runs.
 If you don't have Chrome installed, run `npx playwright install chromium`
 once and remove the `executablePath` line in `tests/e2e/fixtures.ts`.
 
+## Validating adapters against real chat pages
+
+The mocked HTML fixtures keep CI fast and offline, but real ChatGPT / Claude /
+Gemini / Perplexity pages drift over time. To validate selectors against what
+your browser actually sees:
+
+1. Open the conversation in your normal Chrome session.
+2. DevTools → Console → paste [`scripts/capture-dom.js`](scripts/capture-dom.js)
+   → Enter. The minimised, redacted DOM lands on your clipboard.
+3. Save it as `tests/fixtures/<platform>-real-<n>.html` (e.g.
+   `tests/fixtures/claude-real-2026-05.html`).
+4. Add a test against it in `tests/unit/platforms.test.ts` or run an existing
+   E2E pointing at the captured fixture (substitute the real-page HTML for the
+   synthetic one in `tests/fixtures/<platform>-mock-page.html`).
+5. If the existing adapter fails, the test pinpoints the selector that drifted
+   — patch `src/content/platforms/<platform>.ts` and re-run.
+
+The capture script strips inline styles, scripts, SVGs, and data: URLs. Class
+names, `data-*`, `role`, and `aria-*` attributes are preserved because that's
+what the adapters key off. Always inspect the dump before committing — if it
+contains anything you don't want in the repo, edit it down.
+
 ## Known limitations
 
 - The harvester E2E exercises the right-click / shortcut path

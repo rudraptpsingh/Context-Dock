@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+  <head>
+    <title>E2E Perplexity thread - Perplexity</title>
+  </head>
+  <body>
+    <main>
+      <h1 class="text-3xl">What is Native Messaging in Chrome?</h1>
+      <div data-testid="answer">
+        A way for extensions to talk to a locally installed binary over stdin/stdout.
+      </div>
+    </main>
+    <script>
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const main = document.querySelector('main');
+          if (main) main.appendChild(document.createElement('span'));
+        }, 200);
+      });
+    </script>
+  </body>
+</html>
