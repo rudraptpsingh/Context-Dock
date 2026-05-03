@@ -22,6 +22,13 @@ function pickModel(el: Element): string | undefined {
   return m || undefined;
 }
 
+function readText(el: Element): string {
+  const html = el as HTMLElement;
+  // innerText respects visibility but isn't implemented in jsdom; textContent works in both.
+  const text = (typeof html.innerText === 'string' ? html.innerText : null) ?? html.textContent ?? '';
+  return text.trim();
+}
+
 function extractMarkdown(el: Element): string {
   // We grab the content node, prefer `.markdown` (assistant) or the prose container.
   const candidate =
@@ -29,7 +36,7 @@ function extractMarkdown(el: Element): string {
     el.querySelector('[data-message-text]') ||
     el.querySelector('.text-message') ||
     el;
-  return (candidate as HTMLElement).innerText.trim();
+  return readText(candidate);
 }
 
 const chatgpt: PlatformAdapter = {

@@ -31,3 +31,8 @@ npm-debug.log*
 .cache/
 .parcel-cache/
 
+# Test artifacts
+test-results/
+playwright-report/
+coverage/
+

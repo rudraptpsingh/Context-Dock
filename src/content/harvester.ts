@@ -6,6 +6,10 @@
 // auto-sync flag — see HARVEST_REQUEST handling.
 
 import { findAdapter, PlatformAdapter } from './platforms';
+import { createLogger } from '../utils/logger';
+import { startSpan } from '../utils/tracing';
+
+const log = createLogger('harvester');
 
 const STREAMING_DEBOUNCE_MS = 1500;
 const IDLE_DEBOUNCE_MS = 600;
@@ -34,23 +38,40 @@ function quickHash(s: string): string {
 }
 
 function emit(adapter: PlatformAdapter, opts: { force?: boolean } = {}) {
+  const span = startSpan('harvester.emit', { platform: adapter.platform, force: !!opts.force });
   const convId = adapter.parseConversationId(window.location);
-  if (!convId) return; // not on a conversation page
+  if (!convId) {
+    span.setAttribute('skip', 'no-conv-id');
+    span.end('ok');
+    return;
+  }
   const turns = adapter.extractTurns(document);
-  if (!turns.length) return;
+  span.setAttribute('turns', turns.length);
+  if (!turns.length) {
+    span.setAttribute('skip', 'no-turns');
+    span.end('ok');
+    return;
+  }
 
   const isStreaming = adapter.isStreamingPartial?.(turns, document) ?? false;
   if (isStreaming && !opts.force) {
+    span.setAttribute('skip', 'streaming');
+    span.end('ok');
     debounce(() => emit(adapter), STREAMING_DEBOUNCE_MS);
     return;
   }
 
   const summary = turns.map(t => `${t.role}:${t.content}`).join('|');
   const hash = quickHash(summary);
-  if (hash === lastHash && convId === lastEmittedConvId && !opts.force) return;
+  if (hash === lastHash && convId === lastEmittedConvId && !opts.force) {
+    span.setAttribute('skip', 'unchanged');
+    span.end('ok');
+    return;
+  }
   lastHash = hash;
   lastEmittedConvId = convId;
 
+  log.info('emit', { platform: adapter.platform, convId, turns: turns.length });
   chrome.runtime
     .sendMessage({
       type: 'HARVEST_CONVERSATION',
@@ -60,8 +81,10 @@ function emit(adapter: PlatformAdapter, opts: { force?: boolean } = {}) {
       title: adapter.getTitle(document),
       turns,
     })
-    .catch(() => {
-      // background not ready yet; harmless.
+    .then(() => span.end('ok'))
+    .catch(err => {
+      log.warn('sendMessage failed', err);
+      span.end('error', err);
     });
 }
 
@@ -108,7 +131,11 @@ function startObserving(adapter: PlatformAdapter) {
 
 function init() {
   const adapter = findAdapter();
-  if (!adapter) return;
+  if (!adapter) {
+    log.debug('no-adapter', { host: window.location.hostname });
+    return;
+  }
+  log.info('init', { platform: adapter.platform, host: window.location.hostname });
 
   refreshAutoSyncFlags(adapter);
   startObserving(adapter);

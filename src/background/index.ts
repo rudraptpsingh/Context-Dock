@@ -9,6 +9,10 @@ import {
   upsertConversation,
 } from '../utils/storage';
 import * as mcp from './mcpBridge';
+import { createLogger } from '../utils/logger';
+import { trace } from '../utils/tracing';
+
+const log = createLogger('background');
 
 // ---------- Side panel + action ----------
 
@@ -387,12 +391,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'HARVEST_CONVERSATION') {
     (async () => {
-      const result = await upsertConversation({
+      const result = await trace(
+        'background.harvest_upsert',
+        () =>
+          upsertConversation({
+            platform: message.platform,
+            platformConversationId: message.platformConversationId,
+            url: message.url,
+            title: message.title,
+            turns: message.turns,
+          }),
+        { platform: message.platform, turns: message.turns?.length ?? 0 },
+      );
+      log.info('harvested', {
         platform: message.platform,
-        platformConversationId: message.platformConversationId,
-        url: message.url,
-        title: message.title,
-        turns: message.turns,
+        title: result.conversation.title,
+        isNew: result.isNew,
+        changed: result.changed,
+        turns: result.conversation.turns.length,
       });
       chrome.runtime.sendMessage({ type: 'REFRESH_DATA' }).catch(() => {});
       // Push snapshot to MCP bridge if connected

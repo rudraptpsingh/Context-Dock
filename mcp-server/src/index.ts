@@ -11,17 +11,21 @@
 
 import { startMcpServer } from './mcp-server.js';
 import { startNativeHost } from './native-host.js';
+import { createLogger, logFilePath } from './logger.js';
 
+const log = createLogger('main');
 const args = process.argv.slice(2);
 const isNativeHostMode =
   args.includes('--native-host') ||
   args.some(a => a.startsWith('chrome-extension://'));
 
+log.info('starting', { mode: isNativeHostMode ? 'native-host' : 'mcp', logFile: logFilePath });
+
 if (isNativeHostMode) {
   startNativeHost();
 } else {
   startMcpServer().catch(err => {
-    console.error('[context-stash-mcp] fatal:', err);
+    log.error('fatal', err instanceof Error ? err.message : String(err));
     process.exit(1);
   });
 }

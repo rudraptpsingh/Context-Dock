@@ -1,3 +1,7 @@
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('mcp:bridge');
+
 // Native-messaging bridge to the local MCP server.
 //
 // The MCP server is a separate native binary (see ./mcp-server/) that the user
@@ -40,15 +44,18 @@ export function connect(): boolean {
     });
     port.onDisconnect.addListener(() => {
       lastError = chrome.runtime.lastError?.message ?? 'Native host disconnected';
+      log.warn('disconnected', { error: lastError });
       port = null;
     });
     lastError = null;
     connecting = false;
+    log.info('connected', { host: NATIVE_HOST });
     return true;
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);
     port = null;
     connecting = false;
+    log.error('connect failed', lastError);
     return false;
   }
 }

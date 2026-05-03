@@ -4,6 +4,9 @@
 // We read those frames off stdin, process, and write a response with the same framing.
 
 import { upsert, replaceAll, listConversations } from './store.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('native-host');
 
 interface InMessage {
   type:
@@ -32,6 +35,7 @@ function writeFramed(obj: unknown) {
 let inBuf = Buffer.alloc(0);
 
 async function handleMessage(msg: InMessage): Promise<OutMessage> {
+  log.debug('msg', { type: msg.type });
   try {
     switch (msg.type) {
       case 'PUSH_SNAPSHOT':
