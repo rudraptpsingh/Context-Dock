@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Context Stash",
-  "description": "Collect snippets into projects and inject context into AI chats. Organize research and seamlessly paste into ChatGPT, Claude & more.",
+  "description": "Harvest conversations and memory from ChatGPT, Claude, Gemini, and Perplexity. Pipe context into Claude Code, Cursor, Zed and any MCP-aware agent.",
   "version": "1.0.0",
   "icons": {
     "16": "icons/icon16.png",
@@ -12,8 +12,11 @@
     "sidePanel",
     "activeTab",
     "storage",
+    "unlimitedStorage",
     "contextMenus",
-    "scripting"
+    "scripting",
+    "nativeMessaging",
+    "downloads"
   ],
   "background": {
     "service_worker": "src/background/index.ts",
@@ -38,11 +41,51 @@
       "js": ["src/content/injector.ts"]
     },
     {
+      "matches": [
+        "*://chatgpt.com/*",
+        "*://chat.openai.com/*",
+        "*://claude.ai/*",
+        "*://gemini.google.com/*",
+        "*://www.perplexity.ai/*",
+        "*://perplexity.ai/*"
+      ],
+      "js": ["src/content/harvester.ts"],
+      "run_at": "document_idle"
+    },
+    {
       "matches": ["<all_urls>"],
       "js": ["src/content/clipper.ts"]
     }
   ],
   "host_permissions": [
-    "<all_urls>"
-  ]
+    "*://chatgpt.com/*",
+    "*://chat.openai.com/*",
+    "*://claude.ai/*",
+    "*://gemini.google.com/*",
+    "*://www.perplexity.ai/*",
+    "*://perplexity.ai/*"
+  ],
+  "commands": {
+    "open-side-panel": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+K",
+        "mac": "Command+Shift+K"
+      },
+      "description": "Open Context Stash side panel"
+    },
+    "harvest-current-conversation": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+H",
+        "mac": "Command+Shift+H"
+      },
+      "description": "Harvest the current AI conversation"
+    },
+    "paste-active-context": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+P",
+        "mac": "Command+Shift+P"
+      },
+      "description": "Paste context from active project into the focused chat input"
+    }
+  }
 }

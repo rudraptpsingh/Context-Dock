@@ -1,21 +1,86 @@
-import { Project, Snippet, StorageData } from '../types';
+import {
+  AppSettings,
+  Conversation,
+  ConversationTurn,
+  DEFAULT_SETTINGS,
+  LLMPlatform,
+  MemoryEntry,
+  Project,
+  Snippet,
+  STORAGE_SCHEMA_VERSION,
+  StorageData,
+} from '../types';
 
-const DEFAULT_STORAGE: StorageData = {
-  projects: [],
-  activeProjectId: null,
-};
+// ---------- Migration ----------
+
+interface RawStorageRead {
+  schemaVersion?: number;
+  projects?: Project[];
+  activeProjectId?: string | null;
+  conversations?: Conversation[];
+  memories?: MemoryEntry[];
+  settings?: Partial<AppSettings>;
+}
+
+let migrationDone = false;
+
+async function ensureMigrated(): Promise<void> {
+  if (migrationDone) return;
+  const raw = (await chrome.storage.local.get([
+    'schemaVersion',
+    'projects',
+    'activeProjectId',
+    'conversations',
+    'memories',
+    'settings',
+  ])) as RawStorageRead;
+
+  const currentVersion = raw.schemaVersion ?? 1;
+  if (currentVersion >= STORAGE_SCHEMA_VERSION && raw.settings && raw.conversations && raw.memories) {
+    migrationDone = true;
+    return;
+  }
+
+  const migrated: StorageData = {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    projects: raw.projects ?? [],
+    activeProjectId: raw.activeProjectId ?? null,
+    conversations: raw.conversations ?? [],
+    memories: raw.memories ?? [],
+    settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
+  };
+  await chrome.storage.local.set(migrated);
+  migrationDone = true;
+}
+
+// ---------- Top-level reads/writes ----------
 
 export async function getStorageData(): Promise<StorageData> {
-  const result = await chrome.storage.local.get(['projects', 'activeProjectId']);
+  await ensureMigrated();
+  const result = (await chrome.storage.local.get([
+    'schemaVersion',
+    'projects',
+    'activeProjectId',
+    'conversations',
+    'memories',
+    'settings',
+  ])) as RawStorageRead;
   return {
-    projects: result.projects ?? DEFAULT_STORAGE.projects,
-    activeProjectId: result.activeProjectId ?? DEFAULT_STORAGE.activeProjectId,
+    schemaVersion: result.schemaVersion ?? STORAGE_SCHEMA_VERSION,
+    projects: result.projects ?? [],
+    activeProjectId: result.activeProjectId ?? null,
+    conversations: result.conversations ?? [],
+    memories: result.memories ?? [],
+    settings: { ...DEFAULT_SETTINGS, ...(result.settings ?? {}) },
   };
 }
 
 export async function setStorageData(data: Partial<StorageData>): Promise<void> {
+  await ensureMigrated();
   await chrome.storage.local.set(data);
 }
+
+// ---------- Projects (legacy) ----------
 
 export async function getProjects(): Promise<Project[]> {
   const data = await getStorageData();
@@ -50,7 +115,6 @@ export async function addProject(name: string): Promise<Project> {
     snippets: [],
   };
   await setProjects([...projects, newProject]);
-  // If this is the first project, make it active
   if (projects.length === 0) {
     await setActiveProjectId(newProject.id);
   }
@@ -61,8 +125,6 @@ export async function deleteProject(id: string): Promise<void> {
   const data = await getStorageData();
   const projects = data.projects.filter(p => p.id !== id);
   await setProjects(projects);
-  
-  // If we deleted the active project, set a new active one
   if (data.activeProjectId === id) {
     await setActiveProjectId(projects.length > 0 ? projects[0].id : null);
   }
@@ -72,22 +134,24 @@ export async function updateProject(id: string, updates: Partial<Project>): Prom
   const projects = await getProjects();
   const index = projects.findIndex(p => p.id === id);
   if (index === -1) return;
-  
   projects[index] = { ...projects[index], ...updates };
   await setProjects(projects);
 }
 
-export async function addSnippetToProject(projectId: string, snippet: Omit<Snippet, 'id' | 'timestamp'>): Promise<Snippet> {
+export async function addSnippetToProject(
+  projectId: string,
+  snippet: Omit<Snippet, 'id' | 'timestamp'>,
+): Promise<Snippet> {
   const projects = await getProjects();
   const index = projects.findIndex(p => p.id === projectId);
   if (index === -1) throw new Error('Project not found');
-  
+
   const newSnippet: Snippet = {
     ...snippet,
     id: crypto.randomUUID(),
     timestamp: Date.now(),
   };
-  
+
   projects[index].snippets.push(newSnippet);
   await setProjects(projects);
   return newSnippet;
@@ -97,34 +161,202 @@ export async function deleteSnippet(projectId: string, snippetId: string): Promi
   const projects = await getProjects();
   const index = projects.findIndex(p => p.id === projectId);
   if (index === -1) return;
-  
   projects[index].snippets = projects[index].snippets.filter(s => s.id !== snippetId);
   await setProjects(projects);
 }
 
-export async function updateSnippet(projectId: string, snippetId: string, updates: Partial<Omit<Snippet, 'id' | 'timestamp'>>): Promise<void> {
+export async function updateSnippet(
+  projectId: string,
+  snippetId: string,
+  updates: Partial<Omit<Snippet, 'id' | 'timestamp'>>,
+): Promise<void> {
   const projects = await getProjects();
   const projectIndex = projects.findIndex(p => p.id === projectId);
   if (projectIndex === -1) return;
-  
+
   const snippetIndex = projects[projectIndex].snippets.findIndex(s => s.id === snippetId);
   if (snippetIndex === -1) return;
-  
+
   projects[projectIndex].snippets[snippetIndex] = {
     ...projects[projectIndex].snippets[snippetIndex],
-    ...updates
+    ...updates,
   };
-  
+
   await setProjects(projects);
 }
 
-export async function addSnippetToActiveProject(snippet: Omit<Snippet, 'id' | 'timestamp'>): Promise<Snippet | null> {
+export async function addSnippetToActiveProject(
+  snippet: Omit<Snippet, 'id' | 'timestamp'>,
+): Promise<Snippet | null> {
   const activeId = await getActiveProjectId();
   if (!activeId) return null;
   return addSnippetToProject(activeId, snippet);
 }
 
+// ---------- Conversations ----------
+
+export async function getConversations(): Promise<Conversation[]> {
+  const data = await getStorageData();
+  return data.conversations;
+}
+
+export async function setConversations(conversations: Conversation[]): Promise<void> {
+  await setStorageData({ conversations });
+}
+
+export async function getConversation(id: string): Promise<Conversation | null> {
+  const conversations = await getConversations();
+  return conversations.find(c => c.id === id) ?? null;
+}
+
+export async function getConversationByPlatformId(
+  platform: LLMPlatform,
+  platformConversationId: string,
+): Promise<Conversation | null> {
+  const conversations = await getConversations();
+  return (
+    conversations.find(
+      c => c.platform === platform && c.platformConversationId === platformConversationId,
+    ) ?? null
+  );
+}
+
+function hashTurns(turns: ConversationTurn[]): string {
+  // small, deterministic, fast — good enough for change detection.
+  const s = turns.map(t => `${t.role}:${t.content}`).join('\n--\n');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (h * 31 + s.charCodeAt(i)) | 0;
+  }
+  return `h${(h >>> 0).toString(36)}-${turns.length}`;
+}
+
+interface UpsertResult {
+  conversation: Conversation;
+  isNew: boolean;
+  changed: boolean;
+}
+
+export async function upsertConversation(input: {
+  platform: LLMPlatform;
+  platformConversationId: string;
+  url: string;
+  title: string;
+  turns: ConversationTurn[];
+}): Promise<UpsertResult> {
+  const conversations = await getConversations();
+  const existingIndex = conversations.findIndex(
+    c =>
+      c.platform === input.platform &&
+      c.platformConversationId === input.platformConversationId,
+  );
+
+  const now = Date.now();
+  const contentHash = hashTurns(input.turns);
+
+  if (existingIndex === -1) {
+    const conv: Conversation = {
+      id: crypto.randomUUID(),
+      platform: input.platform,
+      platformConversationId: input.platformConversationId,
+      title: input.title,
+      url: input.url,
+      turns: input.turns,
+      tags: [],
+      createdAt: now,
+      lastSyncedAt: now,
+      autoSync: false,
+      contentHash,
+    };
+    await setConversations([...conversations, conv]);
+    return { conversation: conv, isNew: true, changed: true };
+  }
+
+  const existing = conversations[existingIndex];
+  const changed = existing.contentHash !== contentHash;
+  const updated: Conversation = {
+    ...existing,
+    title: input.title || existing.title,
+    url: input.url || existing.url,
+    turns: input.turns,
+    contentHash,
+    lastSyncedAt: now,
+  };
+  conversations[existingIndex] = updated;
+  await setConversations(conversations);
+  return { conversation: updated, isNew: false, changed };
+}
+
+export async function updateConversation(
+  id: string,
+  updates: Partial<Omit<Conversation, 'id'>>,
+): Promise<void> {
+  const conversations = await getConversations();
+  const index = conversations.findIndex(c => c.id === id);
+  if (index === -1) return;
+  conversations[index] = { ...conversations[index], ...updates };
+  await setConversations(conversations);
+}
+
+export async function deleteConversation(id: string): Promise<void> {
+  const conversations = await getConversations();
+  await setConversations(conversations.filter(c => c.id !== id));
+}
+
+export async function setConversationAutoSync(
+  id: string,
+  autoSync: boolean,
+): Promise<void> {
+  await updateConversation(id, { autoSync });
+}
+
+// ---------- Memories ----------
+
+export async function getMemories(): Promise<MemoryEntry[]> {
+  const data = await getStorageData();
+  return data.memories;
+}
+
+export async function setMemories(memories: MemoryEntry[]): Promise<void> {
+  await setStorageData({ memories });
+}
+
+export async function addMemory(platform: LLMPlatform, text: string): Promise<MemoryEntry> {
+  const memories = await getMemories();
+  const entry: MemoryEntry = {
+    id: crypto.randomUUID(),
+    platform,
+    text,
+    capturedAt: Date.now(),
+  };
+  await setMemories([...memories, entry]);
+  return entry;
+}
+
+// ---------- Settings ----------
+
+export async function getSettings(): Promise<AppSettings> {
+  const data = await getStorageData();
+  return data.settings;
+}
+
+export async function updateSettings(updates: Partial<AppSettings>): Promise<AppSettings> {
+  const current = await getSettings();
+  const next = { ...current, ...updates };
+  await setStorageData({ settings: next });
+  return next;
+}
+
+// ---------- Wipe ----------
+
+export async function wipeAll(): Promise<void> {
+  await chrome.storage.local.clear();
+  migrationDone = false;
+  await ensureMigrated();
+}
+
+// ---------- Misc ----------
+
 export function generateUUID(): string {
   return crypto.randomUUID();
 }
-
