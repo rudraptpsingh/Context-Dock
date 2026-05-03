@@ -8,6 +8,6 @@ test('the extension loads and registers a service worker', async ({ context, ext
 test('the side panel HTML loads in a new tab', async ({ context, extensionId }) => {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/src/sidepanel/index.html`);
-  await expect(page.locator('text=Snippets')).toBeVisible({ timeout: 5_000 });
-  await expect(page.locator('text=Conversations')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Snippets' })).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole('button', { name: /Conversations/ })).toBeVisible();
 });

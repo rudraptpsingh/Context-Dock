@@ -7,8 +7,11 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Locates the system Chrome binary so we don't need Playwright's bundled one.
-function systemChromePath(): string | undefined {
+// Default to Playwright's bundled Chromium — extension loading + service-worker
+// observation is more reliable there than against system Chrome under
+// automation. Pass CONTEXT_STASH_USE_SYSTEM_CHROME=1 to force system Chrome.
+function chromePath(): string | undefined {
+  if (process.env.CONTEXT_STASH_USE_SYSTEM_CHROME !== '1') return undefined;
   const candidates = [
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta',
@@ -31,17 +34,16 @@ export const test = base.extend<{
         `Extension build not found at ${EXTENSION_PATH}. Run 'npm run build' first.`,
       );
     }
-    const chromePath = systemChromePath();
+    const exePath = chromePath();
     const userDataDir = mkdtempSync(join(tmpdir(), 'cs-e2e-'));
     const context = await chromium.launchPersistentContext(userDataDir, {
       headless: false,
-      executablePath: chromePath,
+      executablePath: exePath,
       args: [
         `--disable-extensions-except=${EXTENSION_PATH}`,
         `--load-extension=${EXTENSION_PATH}`,
         '--no-first-run',
         '--no-default-browser-check',
-        '--disable-features=DialMediaRouteProvider',
       ],
     });
     await use(context);
@@ -49,10 +51,22 @@ export const test = base.extend<{
   },
 
   extensionId: async ({ context }, use) => {
-    // The service worker (or background page) carries the extension id in its URL.
+    // The service worker carries the extension id in its URL. It registers
+    // lazily, so we may need to nudge it by opening any extension page first.
     let worker = context.serviceWorkers()[0];
     if (!worker) {
-      worker = await context.waitForEvent('serviceworker', { timeout: 10_000 });
+      // Open about:blank just to ensure there's an active page in the context.
+      // (Persistent contexts sometimes start with zero pages, which keeps the
+      // SW in a registered-but-not-started state.)
+      const pages = context.pages();
+      if (!pages.length) {
+        const p = await context.newPage();
+        await p.goto('about:blank').catch(() => undefined);
+      }
+      worker = context.serviceWorkers()[0];
+    }
+    if (!worker) {
+      worker = await context.waitForEvent('serviceworker', { timeout: 20_000 });
     }
     const id = new URL(worker.url()).host;
     await use(id);

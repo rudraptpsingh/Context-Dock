@@ -49,8 +49,9 @@ const chatgpt: PlatformAdapter = {
   },
 
   parseConversationId(loc) {
-    // /c/<uuid> or /g/<gizmo>/c/<uuid>
-    const m = loc.pathname.match(/\/c\/([0-9a-fA-F-]{8,})/);
+    // /c/<id> or /g/<gizmo>/c/<id>. Real IDs are hex UUIDs but we accept any
+    // URL-safe slug to stay forward-compatible with format changes.
+    const m = loc.pathname.match(/\/c\/([\w-]+)/);
     return m ? m[1] : null;
   },
 

@@ -27,6 +27,7 @@ test('harvester captures turns from a mocked ChatGPT page and writes to chrome.s
   });
 
   const page = await context.newPage();
+  page.on('pageerror', err => console.log('[mock-tab:error]', err.message));
   await page.goto('https://chatgpt.com/c/e2e-test-1');
 
   // Side panel: read the conversations list out of chrome.storage.local. We
@@ -36,10 +37,15 @@ test('harvester captures turns from a mocked ChatGPT page and writes to chrome.s
 
   // Trigger a user-initiated harvest by sending a runtime message into the
   // chat tab (this is what the context-menu / keyboard shortcut do).
+  // Fire-and-forget: another content-script listener may return `true` without
+  // calling sendResponse, which would cause the awaited promise to reject.
   await sidePanel.evaluate(async () => {
     const tabs = await chrome.tabs.query({ url: '*://chatgpt.com/*' });
     if (tabs[0]?.id) {
-      await chrome.tabs.sendMessage(tabs[0].id, { type: 'HARVEST_REQUEST' });
+      // Fire-and-forget: another listener may return `true` without responding,
+      // which would reject the awaited promise even though our message reached
+      // the harvester listener correctly.
+      chrome.tabs.sendMessage(tabs[0].id, { type: 'HARVEST_REQUEST' }).catch(() => undefined);
     }
   });
 
