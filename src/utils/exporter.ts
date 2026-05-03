@@ -45,7 +45,7 @@ export function conversationToJson(conv: Conversation): string {
 }
 
 function safeFilename(name: string): string {
-  return name.replace(/[\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80) || 'conversation';
+  return name.replace(/[/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80) || 'conversation';
 }
 
 export async function downloadMarkdown(conv: Conversation): Promise<void> {

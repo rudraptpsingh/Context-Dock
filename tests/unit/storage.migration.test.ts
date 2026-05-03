@@ -9,7 +9,6 @@ const chromeMock = (globalThis as unknown as { chrome: ChromeMock }).chrome;
 // Re-import the module fresh per test so its module-level migration flag resets.
 async function loadStorage() {
   const path = '../../src/utils/storage';
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (await import(/* @vite-ignore */ path)) as typeof import('../../src/utils/storage');
 }
 
