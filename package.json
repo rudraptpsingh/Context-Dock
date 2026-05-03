@@ -13,7 +13,9 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "lint": "eslint src tests mcp-server/src",
-    "ci": "npm run lint && npm run build && npm run test:unit"
+    "ci": "npm run lint && npm run build && npm run test:unit",
+    "validate:fixtures": "node scripts/validate-with-real-fixtures.mjs",
+    "validate:live": "node scripts/live-validate.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.5.0",
@@ -40,6 +42,7 @@
     "jsdom": "^25.0.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
+    "tsx": "^4.21.0",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.59.1",
     "vite": "^5.4.11",

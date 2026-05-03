@@ -59,27 +59,68 @@ and to test against the same Chrome the user actually runs.
 If you don't have Chrome installed, run `npx playwright install chromium`
 once and remove the `executablePath` line in `tests/e2e/fixtures.ts`.
 
-## Validating adapters against real chat pages
+## Validating against your real chat history
 
-The mocked HTML fixtures keep CI fast and offline, but real ChatGPT / Claude /
-Gemini / Perplexity pages drift over time. To validate selectors against what
-your browser actually sees:
+Synthetic fixtures keep CI fast and offline. Two ways to validate selectors
+against what your browser actually sees on logged-in pages:
+
+### Option A — One-shot capture (paste into DevTools)
+
+Best for occasional checks or when you want to add a regression fixture to git.
 
 1. Open the conversation in your normal Chrome session.
-2. DevTools → Console → paste [`scripts/capture-dom.js`](scripts/capture-dom.js)
-   → Enter. The minimised, redacted DOM lands on your clipboard.
-3. Save it as `tests/fixtures/<platform>-real-<n>.html` (e.g.
-   `tests/fixtures/claude-real-2026-05.html`).
-4. Add a test against it in `tests/unit/platforms.test.ts` or run an existing
-   E2E pointing at the captured fixture (substitute the real-page HTML for the
-   synthetic one in `tests/fixtures/<platform>-mock-page.html`).
-5. If the existing adapter fails, the test pinpoints the selector that drifted
-   — patch `src/content/platforms/<platform>.ts` and re-run.
+2. DevTools → Console → paste the contents of
+   [`scripts/capture-dom.js`](scripts/capture-dom.js) → Enter.
+3. Console prints the suggested filename:
+   `tests/fixtures/real/<platform>/<slug>.html`. The captured HTML is on your
+   clipboard.
+4. Save the file. Inspect it before committing — strip anything sensitive.
+5. Run:
+   ```bash
+   npm run validate:fixtures
+   ```
+   The harness loads each fixture, runs the matching adapter against it, and
+   prints turn count, role distribution, conversation id, and content samples.
+   Exits non-zero if any fixture fails to extract turns from both roles.
 
-The capture script strips inline styles, scripts, SVGs, and data: URLs. Class
-names, `data-*`, `role`, and `aria-*` attributes are preserved because that's
-what the adapters key off. Always inspect the dump before committing — if it
-contains anything you don't want in the repo, edit it down.
+The capture script preserves only class names, `role`, `aria-*`, and `data-*`
+attributes — that's what the adapters key off — and strips scripts, styles,
+SVGs, base64 images, and any `<input>`/`<textarea>` so an in-progress prompt
+doesn't leak into the fixture.
+
+### Option B — Live driver (Playwright with a persistent profile)
+
+Best for end-to-end validation across all four platforms in one run.
+
+```bash
+npm run validate:live
+```
+
+What it does:
+
+1. Launches Chromium with a persistent user-data dir at `./.live-profile/`
+   (gitignored, separate from your real Chrome profile so we don't fight
+   Chrome's own lock).
+2. Visits ChatGPT, Claude, Gemini, and Perplexity in turn.
+3. First run: each site's window opens to the login page. Log in manually
+   — the script gives you 3 minutes per platform. Logins persist across runs.
+4. After login it finds the most recent conversation in the sidebar, opens
+   it, runs the adapter against the rendered DOM, and prints a per-platform
+   report.
+5. Each captured DOM is saved to
+   `tests/fixtures/real/<platform>/live-<timestamp>.html` (gitignored) so you
+   can re-run the offline validator over the captures.
+
+If you'd rather use your real Chrome profile (close Chrome first), set
+`CONTEXT_STASH_USER_DIR=/path/to/your/Chrome/profile`.
+
+### Option C — Capture once, regression-test forever
+
+Combine the two: run `validate:live` once to populate
+`tests/fixtures/real/<platform>/live-*.html`, rename the most useful captures
+without the `live-` prefix (so they're tracked in git), commit them, and add
+adapter unit tests that run against them. From then on, any selector drift
+breaks `npm run test:unit` and `npm run validate:fixtures` immediately.
 
 ## Known limitations
 
