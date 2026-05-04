@@ -1,0 +1,184 @@
+name: Release extension to Chrome Web Store
+
+# Triggered by tagging the repo with `ext-vX.Y.Z`. Builds the production
+# bundle, packages it, and (when CWS_PUBLISH=true) uploads + (optionally)
+# publishes via the Chrome Web Store API. Without the secrets it still
+# attaches the zip to a GitHub Release so the user can upload manually.
+#
+# Tagging convention:
+#   git tag ext-v1.1.0 && git push origin ext-v1.1.0
+#
+# Required secrets for full auto-publish (all optional — workflow falls
+# back to "build + GitHub Release only" if any are missing):
+#   CWS_EXTENSION_ID         # the listing's id from chrome.google.com/webstore
+#   CWS_CLIENT_ID            # OAuth 2.0 client id (Google Cloud Console)
+#   CWS_CLIENT_SECRET        # OAuth 2.0 client secret
+#   CWS_REFRESH_TOKEN        # long-lived refresh token (one-time mint)
+#
+# Required variable:
+#   CWS_PUBLISH              # "true" to push to the CWS, "false" or unset
+#                            # to upload-only (saves to draft, no publish)
+
+on:
+  push:
+    tags:
+      - 'ext-v*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Auto-publish after upload (true / false)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build + package
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      zipname: ${{ steps.meta.outputs.zipname }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Read version from manifest
+        id: meta
+        run: |
+          VERSION=$(node -p "require('./src/manifest.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "zipname=context-stash-$VERSION.zip" >> $GITHUB_OUTPUT
+
+      - name: Package
+        run: npm run package
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.zipname }}
+          path: releases/${{ steps.meta.outputs.zipname }}
+          if-no-files-found: error
+
+      - name: Upload sha256
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.zipname }}.sha256
+          path: releases/${{ steps.meta.outputs.zipname }}.sha256
+
+  publish-cws:
+    name: Publish to Chrome Web Store
+    needs: build
+    runs-on: ubuntu-latest
+    # Only attempt when the publish variable is true AND the secrets exist.
+    # An empty CWS_EXTENSION_ID short-circuits the job so first-time setup
+    # without secrets doesn't fail CI.
+    if: ${{ vars.CWS_PUBLISH == 'true' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.zipname }}
+          path: ./pkg
+
+      - name: Refresh OAuth access token
+        id: token
+        env:
+          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ] || [ -z "$REFRESH_TOKEN" ]; then
+            echo "::error::CWS_CLIENT_ID / CWS_CLIENT_SECRET / CWS_REFRESH_TOKEN secrets missing"
+            exit 1
+          fi
+          ACCESS=$(curl -s -X POST \
+            -d "client_id=$CLIENT_ID" \
+            -d "client_secret=$CLIENT_SECRET" \
+            -d "refresh_token=$REFRESH_TOKEN" \
+            -d "grant_type=refresh_token" \
+            https://oauth2.googleapis.com/token | jq -r .access_token)
+          if [ -z "$ACCESS" ] || [ "$ACCESS" = "null" ]; then
+            echo "::error::Failed to refresh access token — check secrets"
+            exit 1
+          fi
+          # Mask the token in subsequent log output.
+          echo "::add-mask::$ACCESS"
+          echo "access=$ACCESS" >> $GITHUB_OUTPUT
+
+      - name: Upload zip to existing CWS item
+        env:
+          ACCESS: ${{ steps.token.outputs.access }}
+          EXT_ID: ${{ secrets.CWS_EXTENSION_ID }}
+          ZIP_PATH: ./pkg/${{ needs.build.outputs.zipname }}
+        run: |
+          set -euo pipefail
+          if [ -z "$EXT_ID" ]; then
+            echo "::error::CWS_EXTENSION_ID secret missing"
+            exit 1
+          fi
+          curl -sS -f \
+            -H "Authorization: Bearer $ACCESS" \
+            -H "x-goog-api-version: 2" \
+            -X PUT -T "$ZIP_PATH" \
+            "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$EXT_ID"
+          echo
+          echo "✓ Upload complete"
+
+      - name: Publish (if requested)
+        if: ${{ github.event.inputs.publish == 'true' || vars.CWS_AUTO_PUBLISH == 'true' }}
+        env:
+          ACCESS: ${{ steps.token.outputs.access }}
+          EXT_ID: ${{ secrets.CWS_EXTENSION_ID }}
+        run: |
+          set -euo pipefail
+          curl -sS -f \
+            -H "Authorization: Bearer $ACCESS" \
+            -H "x-goog-api-version: 2" \
+            -H "Content-Length: 0" \
+            -X POST \
+            "https://www.googleapis.com/chromewebstore/v1.1/items/$EXT_ID/publish"
+          echo
+          echo "✓ Submitted to Chrome Web Store for review"
+
+  github-release:
+    name: Attach to GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.zipname }}
+          path: ./release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.zipname }}.sha256
+          path: ./release
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "name=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Context Stash ${{ needs.build.outputs.version }}
+          generate_release_notes: true
+          files: |
+            release/*
