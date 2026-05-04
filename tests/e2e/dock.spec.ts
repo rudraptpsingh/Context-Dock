@@ -79,6 +79,48 @@ test('saving a snippet with no project auto-creates "Quick Stash" and saves into
   expect(result!.activeMatches).toBe(true);
 });
 
+test('dock position persists across reloads via localStorage', async ({ context, extensionId }) => {
+  void extensionId;
+  await context.route(/^https?:\/\/chatgpt\.com\//, async route => {
+    if (route.request().resourceType() !== 'document') {
+      return route.fulfill({ status: 404, body: '' });
+    }
+    await route.fulfill({ status: 200, contentType: 'text/html', body: CHATGPT_HTML });
+  });
+
+  const page = await context.newPage();
+  await page.goto('https://chatgpt.com/c/dock-pos');
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForFunction(
+    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.dock'),
+    null,
+    { timeout: 8_000 },
+  );
+
+  // Manually save a position to localStorage and reload — the dock should
+  // pick it up on next mount. (Drag interactions in headless mode are
+  // pointer-event-quirky; the storage path is what we actually need to
+  // exercise.)
+  await page.evaluate(() => {
+    localStorage.setItem('cs:dock-pos:chatgpt.com', JSON.stringify({ left: 64, top: 200 }));
+  });
+  await page.reload();
+  await page.waitForFunction(
+    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.dock'),
+    null,
+    { timeout: 8_000 },
+  );
+
+  const pos = await page.evaluate(() => {
+    const root = document.getElementById('cs-dock-root')!;
+    return { left: root.style.left, top: root.style.top, right: root.style.right, bottom: root.style.bottom };
+  });
+  expect(pos.left).toBe('64px');
+  expect(pos.top).toBe('200px');
+  expect(pos.right).toBe('auto');
+  expect(pos.bottom).toBe('auto');
+});
+
 test('dock "+ Context" inject flow ranks snippets and inserts into a textarea', async ({
   context,
   extensionId,

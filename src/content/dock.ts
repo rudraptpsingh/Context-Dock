@@ -37,8 +37,11 @@ function colorForId(id: string): string {
 const STYLES = `
   :host {
     position: fixed;
-    top: 12px;
-    right: 12px;
+    /* Default: lower-right, well above the chat input bar so we don't clip
+       site composer affordances. The actual position is set inline by JS so
+       the user can drag-reposition; this is just the cold-start fallback. */
+    bottom: 120px;
+    right: 16px;
     z-index: 2147483647;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     color-scheme: light dark;
@@ -46,42 +49,50 @@ const STYLES = `
   .dock {
     display: flex;
     align-items: center;
-    gap: 8px;
-    background: rgba(15, 23, 42, 0.94);
+    gap: 6px;
+    background: rgba(15, 23, 42, 0.92);
     color: #f8fafc;
-    padding: 6px 10px 6px 6px;
+    padding: 4px 8px 4px 4px;
     border-radius: 999px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.18);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    cursor: pointer;
     user-select: none;
     transition: padding 120ms ease, transform 120ms ease;
   }
-  .dock:hover { transform: translateY(-1px); }
+  .drag-handle {
+    cursor: grab;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+  }
+  .drag-handle:active { cursor: grabbing; }
+  .dock.dragging { transform: scale(1.04); box-shadow: 0 8px 24px rgba(0,0,0,0.32); }
   .dot {
-    width: 18px; height: 18px; border-radius: 999px;
+    width: 14px; height: 14px; border-radius: 999px;
     background: var(--cs-color, #2563eb);
     flex: 0 0 auto;
-    box-shadow: 0 0 0 2px rgba(255,255,255,0.18) inset;
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.16) inset;
+    cursor: pointer;
   }
   .dot.synced::after {
     content: "";
     display: block;
-    width: 6px; height: 6px;
+    width: 5px; height: 5px;
     border-radius: 999px;
     background: #22c55e;
-    margin: 6px 0 0 6px;
+    margin: 4px 0 0 4px;
     box-shadow: 0 0 0 2px #0f172a;
   }
   .label {
-    font-size: 12px; font-weight: 600; letter-spacing: 0.01em;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.01em;
     max-width: 0; overflow: hidden; white-space: nowrap;
     transition: max-width 160ms ease, margin-right 160ms ease;
     margin-right: 0;
+    cursor: pointer;
   }
   .dock:hover .label, .dock[data-expanded="true"] .label {
-    max-width: 240px; margin-right: 4px;
+    max-width: 220px; margin-right: 4px;
   }
   .actions {
     display: none;
@@ -144,6 +155,13 @@ export function mountDock() {
   dock.setAttribute('role', 'group');
   dock.setAttribute('aria-label', 'Context Stash');
   dock.innerHTML = `
+    <div class="drag-handle" id="cs-drag" title="Drag to move" aria-label="Drag to move">
+      <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" opacity="0.5">
+        <circle cx="3" cy="3" r="1.2"/><circle cx="7" cy="3" r="1.2"/>
+        <circle cx="3" cy="7" r="1.2"/><circle cx="7" cy="7" r="1.2"/>
+        <circle cx="3" cy="11" r="1.2"/><circle cx="7" cy="11" r="1.2"/>
+      </svg>
+    </div>
     <div class="dot" id="cs-dot"></div>
     <div class="label" id="cs-label">Context Stash</div>
     <div class="actions" id="cs-actions">
@@ -191,6 +209,94 @@ export function mountDock() {
     expanded = next;
     dock.setAttribute('data-expanded', String(expanded));
   }
+
+  // ---------- Drag-to-reposition ----------
+  //
+  // Per-host saved position: localStorage (Edge-safe; chrome.storage.session
+  // sometimes throws "Access to storage is not allowed" in content contexts).
+  // Position is stored as { left, top } in viewport-pixel coordinates, then
+  // re-applied on init. Snaps to viewport edges when within 24px.
+
+  const POS_KEY = `cs:dock-pos:${location.host}`;
+
+  function readSavedPos(): { left: number; top: number } | null {
+    try {
+      const raw = localStorage.getItem(POS_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { left: number; top: number };
+      if (typeof parsed.left === 'number' && typeof parsed.top === 'number') return parsed;
+    } catch {
+      /* ignore corrupt value */
+    }
+    return null;
+  }
+
+  function applyPosition(pos: { left: number; top: number }) {
+    // Use left/top so we override the CSS bottom/right defaults cleanly.
+    host.style.left = `${pos.left}px`;
+    host.style.top = `${pos.top}px`;
+    host.style.right = 'auto';
+    host.style.bottom = 'auto';
+  }
+
+  function clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  // Apply any saved position immediately so we don't see a flash at the
+  // default location.
+  const savedPos = readSavedPos();
+  if (savedPos) applyPosition(savedPos);
+
+  const dragHandle = $('#cs-drag') as HTMLDivElement;
+  let dragState: { startX: number; startY: number; origLeft: number; origTop: number } | null = null;
+  dragHandle.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragHandle.setPointerCapture(e.pointerId);
+    const rect = host.getBoundingClientRect();
+    dragState = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origLeft: rect.left,
+      origTop: rect.top,
+    };
+    dock.classList.add('dragging');
+  });
+  dragHandle.addEventListener('pointermove', e => {
+    if (!dragState) return;
+    const newLeft = dragState.origLeft + (e.clientX - dragState.startX);
+    const newTop = dragState.origTop + (e.clientY - dragState.startY);
+    const dockRect = host.getBoundingClientRect();
+    const left = clamp(newLeft, 0, window.innerWidth - dockRect.width);
+    const top = clamp(newTop, 0, window.innerHeight - dockRect.height);
+    applyPosition({ left, top });
+  });
+  dragHandle.addEventListener('pointerup', e => {
+    if (!dragState) return;
+    dragHandle.releasePointerCapture(e.pointerId);
+    dragState = null;
+    dock.classList.remove('dragging');
+    // Snap to nearest edge if close.
+    const rect = host.getBoundingClientRect();
+    const SNAP = 24;
+    let left = rect.left;
+    let top = rect.top;
+    if (left < SNAP) left = 8;
+    else if (window.innerWidth - rect.right < SNAP) left = window.innerWidth - rect.width - 8;
+    if (top < SNAP) top = 8;
+    else if (window.innerHeight - rect.bottom < SNAP) top = window.innerHeight - rect.height - 8;
+    applyPosition({ left, top });
+    try {
+      localStorage.setItem(POS_KEY, JSON.stringify({ left, top }));
+    } catch {
+      /* ignore quota / privacy errors */
+    }
+  });
+  // Suppress accidental click after drag.
+  dragHandle.addEventListener('click', e => {
+    e.stopPropagation();
+  });
 
   dock.addEventListener('click', e => {
     const btn = (e.target as Element).closest('button.action, button.close') as HTMLButtonElement | null;
