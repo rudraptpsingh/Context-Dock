@@ -30,9 +30,9 @@ jobs:
       - name: Build extension
         run: npm run build
 
-      - name: Unit tests
-        run: npm run test:unit
-
+      # The MCP server has to be compiled BEFORE unit tests because the
+      # integration test in vitest's `integration` workspace project spawns
+      # the compiled binary as a subprocess. Otherwise it skips silently.
       - name: Install MCP server deps
         working-directory: mcp-server
         run: npm ci
@@ -40,6 +40,9 @@ jobs:
       - name: Build MCP server
         working-directory: mcp-server
         run: npm run build
+
+      - name: Unit + integration tests
+        run: npm run test:unit
 
   e2e:
     name: E2E (Playwright + Chromium)

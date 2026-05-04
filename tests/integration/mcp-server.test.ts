@@ -177,7 +177,7 @@ describe('MCP server: real protocol roundtrip via spawned binary', () => {
   }, 10_000);
 
   afterAll(async () => {
-    await client.close();
+    if (client) await client.close();
   });
 
   it('lists conversations as resources via resources/list', async () => {
