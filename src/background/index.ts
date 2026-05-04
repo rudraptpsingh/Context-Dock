@@ -17,6 +17,7 @@ import { trace } from '../utils/tracing';
 import { summarizeConversation, isSummarizerReady } from '../utils/builtinAI';
 import { updateConversation, getMemories } from '../utils/storage';
 import { rankCandidates, type Candidate } from '../utils/ranker';
+import { installOmnibox } from './omnibox';
 
 const log = createLogger('background');
 
@@ -44,10 +45,29 @@ const CHAT_DOC_PATTERNS = [
 // duplicate id" runtime errors. We single-flight the rebuild and coalesce
 // burst calls (e.g. when several snippets are saved in quick succession).
 
+// chrome.contextMenus.create can race with itself across SW restarts,
+// onInstalled, onStartup, and storage-change events even with a single-flight
+// guard — Edge in particular surfaces the duplicate-id errors loudly. Each
+// create() is wrapped so a duplicate-id from a parallel build is silently
+// ignored; the functional outcome (every expected menu item exists) is what
+// matters. Other failures still surface via chrome.runtime.lastError but
+// don't crash the whole rebuild.
+async function safeCreate(props: chrome.contextMenus.CreateProperties): Promise<void> {
+  await new Promise<void>(resolve => {
+    chrome.contextMenus.create(props, () => {
+      const err = chrome.runtime.lastError;
+      if (err && !/duplicate id/i.test(err.message ?? '')) {
+        log.debug('contextMenus.create failed', { id: props.id, err: err.message });
+      }
+      resolve();
+    });
+  });
+}
+
 async function buildMenusOnce() {
   await chrome.contextMenus.removeAll();
 
-  await chrome.contextMenus.create({
+  await safeCreate({
     id: 'save-selection-root',
     title: 'Save selection to Context Stash',
     contexts: ['selection'],
@@ -55,65 +75,65 @@ async function buildMenusOnce() {
 
   const projects = await getProjects();
   for (const project of projects) {
-    await chrome.contextMenus.create({
+    await safeCreate({
       id: `save-selection-project-${project.id}`,
       parentId: 'save-selection-root',
       title: project.name,
       contexts: ['selection'],
     });
   }
-  await chrome.contextMenus.create({
+  await safeCreate({
     id: 'save-selection-separator',
     parentId: 'save-selection-root',
     type: 'separator',
     contexts: ['selection'],
   });
-  await chrome.contextMenus.create({
+  await safeCreate({
     id: 'save-selection-active',
     parentId: 'save-selection-root',
     title: 'Save to Active Project',
     contexts: ['selection'],
   });
-  await chrome.contextMenus.create({
+  await safeCreate({
     id: 'save-selection-new-project',
     parentId: 'save-selection-root',
     title: '+ Create New Project...',
     contexts: ['selection'],
   });
 
-  await chrome.contextMenus.create({
+  await safeCreate({
     id: 'clip-page',
     title: 'Clip Page to Context Stash',
     contexts: ['page'],
   });
 
-  await chrome.contextMenus.create({
+  await safeCreate({
     id: 'harvest-conversation',
     title: 'Harvest this conversation to Context Stash',
     contexts: ['page'],
     documentUrlPatterns: CHAT_DOC_PATTERNS,
   });
 
-  await chrome.contextMenus.create({
+  await safeCreate({
     id: 'paste-context-dock-root',
     title: 'Paste Context from Context Stash',
     contexts: ['editable'],
   });
   for (const project of projects) {
-    await chrome.contextMenus.create({
+    await safeCreate({
       id: `paste-context-dock-project-${project.id}`,
       parentId: 'paste-context-dock-root',
       title: project.name,
       contexts: ['editable'],
     });
   }
-  await chrome.contextMenus.create({
+  await safeCreate({
     id: 'paste-context-dock-separator',
     parentId: 'paste-context-dock-root',
     type: 'separator',
     contexts: ['editable'],
   });
-  await chrome.contextMenus.create({
+  await safeCreate({
     id: 'paste-context-dock-active',
     parentId: 'paste-context-dock-root',
     title: 'Paste from Active Project',
@@ -159,6 +179,9 @@ function scheduleMenuRebuild() {
 
 chrome.runtime.onInstalled.addListener(() => void createContextMenus());
 chrome.runtime.onStartup.addListener(() => void createContextMenus());
+
+// Omnibox: type "cs " in the URL bar to search the corpus.
+installOmnibox();
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.projects) scheduleMenuRebuild();
 });

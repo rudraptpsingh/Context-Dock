@@ -202,8 +202,17 @@ export function mountDock() {
     const action = btn.getAttribute('data-action');
     if (action === 'close') {
       host.remove();
-      // Per-tab dismissal: session storage clears when the tab closes.
-      void chrome.storage.session.set({ [`cs:dock-dismissed:${location.host}`]: true });
+      // Per-tab dismissal: try session storage so it survives same-tab
+      // navigations. Edge restricts chrome.storage.session in some content
+      // contexts — fall back to in-memory only (the dock stays gone for the
+      // life of this page either way).
+      try {
+        void chrome.storage.session
+          ?.set({ [`cs:dock-dismissed:${location.host}`]: true })
+          .catch(() => undefined);
+      } catch {
+        /* ignored — degrade to per-page-load dismissal */
+      }
       return;
     }
     if (action === 'harvest') {
@@ -391,10 +400,16 @@ export function mountDock() {
 
   void refreshState();
 
-  // Honour per-tab dismissal.
+  // Honour per-tab dismissal. Both the get and the surrounding context can
+  // throw on Edge, so we belt-and-braces it.
   void (async () => {
-    const r = await chrome.storage.session.get(`cs:dock-dismissed:${location.host}`);
-    if (r[`cs:dock-dismissed:${location.host}`]) host.remove();
+    try {
+      const key = `cs:dock-dismissed:${location.host}`;
+      const r = await chrome.storage.session?.get(key);
+      if (r && r[key]) host.remove();
+    } catch {
+      /* ignored — show the dock if we can't read dismissal state */
+    }
   })();
 
   log.info('mounted', { platform: adapter.platform, host: location.host });
