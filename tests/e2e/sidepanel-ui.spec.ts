@@ -92,9 +92,12 @@ test('side panel: search box filters the conversation list', async ({ context, e
       conversations: [mk('a', 'Alpha launch plan'), mk('b', 'Beta launch plan'), mk('c', 'Recipes')],
     });
   });
+  // Storage change subscription is sometimes laggy in CI Chrome — reload
+  // so the React tree boots with the seeded data already present.
+  await panel.reload();
 
   await panel.getByRole('button', { name: /Conversations/ }).click();
-  await expect(panel.getByText('Alpha launch plan')).toBeVisible();
+  await expect(panel.getByText('Alpha launch plan')).toBeVisible({ timeout: 10_000 });
   await expect(panel.getByText('Recipes')).toBeVisible();
 
   await panel.getByPlaceholder('Search conversations...').fill('launch');
