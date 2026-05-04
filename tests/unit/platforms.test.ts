@@ -93,14 +93,22 @@ describe('Claude.ai adapter', () => {
 describe('Gemini adapter', () => {
   beforeEach(() => setLocation('https://gemini.google.com/app'));
 
-  it('derives a stable id from the first user message text', () => {
+  it('prefers /app/<id> from the URL when present', () => {
+    setLocation('https://gemini.google.com/app/6b754af87338b14b?hl=en-IN');
+    setDom(
+      `<main><div class="conversation-container"><div class="user-message-bubble-color">irrelevant</div></div></main>`,
+      'X',
+    );
+    expect(gemini.parseConversationId(window.location)).toBe('6b754af87338b14b');
+  });
+
+  it('falls back to hashing the first user message on the listing page', () => {
     setDom(
       `<main><div class="conversation-container"><div class="user-message-bubble-color">What is RAG?</div></div></main>`,
       'X',
     );
     const id = gemini.parseConversationId(window.location);
     expect(id).toMatch(/^gemini-[\w]+$/);
-    // Same message → same id; different message → different id.
     expect(gemini.parseConversationId(window.location)).toBe(id);
     setDom(
       `<main><div class="conversation-container"><div class="user-message-bubble-color">Different question entirely</div></div></main>`,
@@ -109,7 +117,7 @@ describe('Gemini adapter', () => {
     expect(gemini.parseConversationId(window.location)).not.toBe(id);
   });
 
-  it('returns null when there is no user message yet', () => {
+  it('returns null when there is no URL id and no user message yet', () => {
     setDom('<main><div class="conversation-container"></div></main>', 'X');
     expect(gemini.parseConversationId(window.location)).toBeNull();
   });

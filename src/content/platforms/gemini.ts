@@ -3,11 +3,20 @@ import { PlatformAdapter } from './types';
 
 const HOSTS = ['gemini.google.com'];
 
-// Gemini doesn't put the conversation id in the URL — it's in the SPA's
-// internal routing. We hash the first user message to derive a stable id
-// scoped to the page session. This is good enough for upsert dedup; once
-// Google exposes a public id we'll switch.
-function deriveConversationId(doc: Document): string | null {
+// Preferred path: Gemini exposes /app/<hex-id> in the URL once you've opened
+// a specific conversation. That's stable across sessions and matches the
+// platform's native id, so re-harvest finds the same row.
+//
+// Fallback: on the listing page (/app with no id) we derive a session-scoped
+// id by hashing the first user message text, so the harvester still has
+// something to upsert against. Anything captured this way is replaced by
+// the URL-based id the next time the user re-harvests.
+function urlId(loc: Location): string | null {
+  const m = loc.pathname.match(/\/app\/([\w-]+)/);
+  return m ? m[1] : null;
+}
+
+function hashedId(doc: Document): string | null {
   const firstUser = doc.querySelector<HTMLElement>('.user-message-bubble-color, [class*="user-query"]');
   const text = (firstUser?.textContent ?? '').trim();
   if (!text) return null;
@@ -30,8 +39,8 @@ const gemini: PlatformAdapter = {
     return HOSTS.includes(loc.hostname);
   },
 
-  parseConversationId() {
-    return deriveConversationId(document);
+  parseConversationId(loc) {
+    return urlId(loc) ?? hashedId(document);
   },
 
   getTitle(doc) {
