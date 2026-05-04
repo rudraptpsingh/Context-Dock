@@ -31,11 +31,16 @@ const CHAT_DOC_PATTERNS = [
 ];
 
 // ---------- Context menus ----------
+//
+// Multiple events trigger a rebuild (install, startup, projects change).
+// Without coordination, two concurrent runs both call removeAll() and then
+// race on create() — Chrome/Edge surfaces this as "Cannot create item with
+// duplicate id" runtime errors. We single-flight the rebuild and coalesce
+// burst calls (e.g. when several snippets are saved in quick succession).
 
-async function createContextMenus() {
+async function buildMenusOnce() {
   await chrome.contextMenus.removeAll();
 
-  // SAVE SELECTION
   await chrome.contextMenus.create({
     id: 'save-selection-root',
     title: 'Save selection to Context Stash',
@@ -70,14 +75,12 @@ async function createContextMenus() {
     contexts: ['selection'],
   });
 
-  // CLIP PAGE
   await chrome.contextMenus.create({
     id: 'clip-page',
     title: 'Clip Page to Context Stash',
     contexts: ['page'],
   });
 
-  // HARVEST CONVERSATION (chat domains only)
   await chrome.contextMenus.create({
     id: 'harvest-conversation',
     title: 'Harvest this conversation to Context Stash',
@@ -85,7 +88,6 @@ async function createContextMenus() {
     documentUrlPatterns: CHAT_DOC_PATTERNS,
   });
 
-  // PASTE CONTEXT
   await chrome.contextMenus.create({
     id: 'paste-context-dock-root',
     title: 'Paste Context from Context Stash',
@@ -113,12 +115,46 @@ async function createContextMenus() {
   });
 }
 
-chrome.runtime.onInstalled.addListener(() => createContextMenus().catch(console.error));
-chrome.runtime.onStartup.addListener(() => createContextMenus().catch(console.error));
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'local' && changes.projects) {
-    createContextMenus().catch(console.error);
+let menuRebuildInFlight: Promise<void> | null = null;
+let menuRebuildPending = false;
+let menuRebuildDebounce: number | undefined;
+
+async function createContextMenus(): Promise<void> {
+  if (menuRebuildInFlight) {
+    // Coalesce: a rebuild is already running; mark that we want another pass
+    // after it completes so we always finish on the latest projects state.
+    menuRebuildPending = true;
+    return menuRebuildInFlight;
   }
+  menuRebuildInFlight = (async () => {
+    try {
+      await buildMenusOnce();
+    } catch (err) {
+      log.warn('context menu rebuild failed', err instanceof Error ? err.message : String(err));
+    }
+  })();
+  await menuRebuildInFlight;
+  menuRebuildInFlight = null;
+  if (menuRebuildPending) {
+    menuRebuildPending = false;
+    return createContextMenus();
+  }
+}
+
+function scheduleMenuRebuild() {
+  // 200ms is short enough to feel instant but long enough to coalesce a
+  // burst of storage writes (e.g. saving several snippets in a row).
+  if (menuRebuildDebounce !== undefined) clearTimeout(menuRebuildDebounce);
+  menuRebuildDebounce = setTimeout(() => {
+    menuRebuildDebounce = undefined;
+    void createContextMenus();
+  }, 200) as unknown as number;
+}
+
+chrome.runtime.onInstalled.addListener(() => void createContextMenus());
+chrome.runtime.onStartup.addListener(() => void createContextMenus());
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.projects) scheduleMenuRebuild();
 });
 
 // ---------- Toast helper (injected into pages) ----------
