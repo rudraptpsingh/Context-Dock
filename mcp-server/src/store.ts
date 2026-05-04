@@ -31,8 +31,16 @@ const DATA_DIR = process.env.CONTEXT_STASH_DATA_DIR ??
   join(homedir(), '.config', 'context-stash');
 const DATA_FILE = join(DATA_DIR, 'conversations.json');
 
+export interface Memory {
+  id: string;
+  platform: string;
+  text: string;
+  capturedAt: number;
+}
+
 interface Store {
   conversations: Conversation[];
+  memories?: Memory[];
 }
 
 let cache: Store | null = null;
@@ -77,6 +85,26 @@ export async function listConversations(): Promise<Conversation[]> {
 export async function getConversation(id: string): Promise<Conversation | null> {
   const store = await load();
   return store.conversations.find(c => c.id === id) ?? null;
+}
+
+export async function listMemories(opts: { platform?: string } = {}): Promise<Memory[]> {
+  const store = await load();
+  const memories = store.memories ?? [];
+  const filtered = opts.platform ? memories.filter(m => m.platform === opts.platform) : memories;
+  return [...filtered].sort((a, b) => b.capturedAt - a.capturedAt);
+}
+
+export async function searchMemories(query: string, opts: { platform?: string; limit?: number } = {}): Promise<Memory[]> {
+  const all = await listMemories({ platform: opts.platform });
+  const q = query.trim().toLowerCase();
+  const filtered = q ? all.filter(m => m.text.toLowerCase().includes(q)) : all;
+  return filtered.slice(0, opts.limit ?? 20);
+}
+
+export async function replaceMemories(memories: Memory[]): Promise<void> {
+  const store = await load();
+  cache = { ...store, memories };
+  await save();
 }
 
 export async function searchConversations(

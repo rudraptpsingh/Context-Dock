@@ -18,7 +18,9 @@ import {
   conversationToMarkdown,
   getConversation,
   listConversations,
+  listMemories,
   searchConversations,
+  searchMemories,
 } from './store.js';
 
 export async function startMcpServer(): Promise<void> {
@@ -28,32 +30,53 @@ export async function startMcpServer(): Promise<void> {
   );
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
-    const conversations = await listConversations();
-    return {
-      resources: conversations.map(c => ({
-        uri: `context-stash://conversation/${c.id}`,
-        name: c.title,
-        description: `${c.platform} · ${c.turns.length} turns · last synced ${new Date(c.lastSyncedAt).toISOString()}`,
-        mimeType: 'text/markdown',
-      })),
-    };
+    const [conversations, memories] = await Promise.all([listConversations(), listMemories()]);
+    const convResources = conversations.map(c => ({
+      uri: `context-stash://conversation/${c.id}`,
+      name: c.title,
+      description: `${c.platform} · ${c.turns.length} turns · last synced ${new Date(c.lastSyncedAt).toISOString()}`,
+      mimeType: 'text/markdown',
+    }));
+    // Group memories per platform into one resource each — N small memories
+    // would balloon the resource list. The reader builds a single Markdown
+    // document.
+    const platforms = Array.from(new Set(memories.map(m => m.platform)));
+    const memoryResources = platforms.map(p => ({
+      uri: `context-stash://memories/${p}`,
+      name: `${p} memories`,
+      description: `${memories.filter(m => m.platform === p).length} captured memories from ${p}`,
+      mimeType: 'text/markdown',
+    }));
+    return { resources: [...convResources, ...memoryResources] };
   });
 
   server.setRequestHandler(ReadResourceRequestSchema, async req => {
     const uri = req.params.uri;
-    const match = /^context-stash:\/\/conversation\/(.+)$/.exec(uri);
-    if (!match) throw new Error(`Unknown resource: ${uri}`);
-    const conv = await getConversation(match[1]);
-    if (!conv) throw new Error(`Conversation not found: ${match[1]}`);
-    return {
-      contents: [
-        {
-          uri,
-          mimeType: 'text/markdown',
-          text: conversationToMarkdown(conv),
-        },
-      ],
-    };
+    const convMatch = /^context-stash:\/\/conversation\/(.+)$/.exec(uri);
+    if (convMatch) {
+      const conv = await getConversation(convMatch[1]);
+      if (!conv) throw new Error(`Conversation not found: ${convMatch[1]}`);
+      return {
+        contents: [{ uri, mimeType: 'text/markdown', text: conversationToMarkdown(conv) }],
+      };
+    }
+    const memMatch = /^context-stash:\/\/memories\/(.+)$/.exec(uri);
+    if (memMatch) {
+      const platform = memMatch[1];
+      const memories = await listMemories({ platform });
+      if (!memories.length) throw new Error(`No memories for platform: ${platform}`);
+      const md = [
+        `# ${platform} memories`,
+        '',
+        `${memories.length} entries captured by Context Stash.`,
+        '',
+        '---',
+        '',
+        ...memories.map(m => `- ${m.text}  \n  _captured ${new Date(m.capturedAt).toISOString()}_`),
+      ].join('\n');
+      return { contents: [{ uri, mimeType: 'text/markdown', text: md }] };
+    }
+    throw new Error(`Unknown resource: ${uri}`);
   });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -83,6 +106,19 @@ export async function startMcpServer(): Promise<void> {
           properties: {
             platform: { type: 'string' },
             limit: { type: 'number', description: 'Default 10.' },
+          },
+        },
+      },
+      {
+        name: 'search_memories',
+        description:
+          'Search captured memories (ChatGPT saved memories, Claude personalization instructions, etc.). Returns matching memory texts.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            platform: { type: 'string' },
+            limit: { type: 'number', description: 'Default 20.' },
           },
         },
       },
@@ -132,6 +168,28 @@ export async function startMcpServer(): Promise<void> {
                 platform: c.platform,
                 turns: c.turns.length,
                 lastSyncedAt: c.lastSyncedAt,
+              })),
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    }
+    if (req.params.name === 'search_memories') {
+      const matches = await searchMemories(String(args.query ?? ''), {
+        platform: typeof args.platform === 'string' ? args.platform : undefined,
+        limit: typeof args.limit === 'number' ? args.limit : 20,
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              matches.map(m => ({
+                platform: m.platform,
+                text: m.text,
+                capturedAt: m.capturedAt,
               })),
               null,
               2,

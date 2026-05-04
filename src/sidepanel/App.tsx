@@ -8,6 +8,7 @@ import CreateProjectModal from './components/CreateProjectModal';
 import EditSnippetModal from './components/EditSnippetModal';
 import ConversationList from './components/ConversationList';
 import BulkImportButton from './components/BulkImportButton';
+import MemoriesPanel from './components/MemoriesPanel';
 import ConversationDetail from './components/ConversationDetail';
 import McpSetupWizard from './components/McpSetupWizard';
 import { useProjects } from './hooks/useProjects';
@@ -277,6 +278,7 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+                <MemoriesPanel />
                 <ConversationList
                   conversations={conversationsApi.conversations}
                   onOpen={setOpenConversationId}

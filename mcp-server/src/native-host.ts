@@ -3,7 +3,7 @@
 // Each message from Chrome is framed as: 4-byte little-endian length + UTF-8 JSON.
 // We read those frames off stdin, process, and write a response with the same framing.
 
-import { upsert, replaceAll, listConversations } from './store.js';
+import { upsert, replaceAll, listConversations, replaceMemories, listMemories } from './store.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('native-host');
@@ -12,8 +12,10 @@ interface InMessage {
   type:
     | 'PUSH_SNAPSHOT'
     | 'REPLACE_ALL'
+    | 'REPLACE_MEMORIES'
     | 'GET_CONVERSATIONS'
-    | 'GET_CONVERSATION';
+    | 'GET_CONVERSATION'
+    | 'GET_MEMORIES';
   payload?: unknown;
   id?: string;
 }
@@ -51,6 +53,15 @@ async function handleMessage(msg: InMessage): Promise<OutMessage> {
       case 'GET_CONVERSATIONS': {
         const list = await listConversations();
         return { ok: true, type: 'CONVERSATIONS', data: list };
+      }
+      case 'REPLACE_MEMORIES':
+        if (Array.isArray(msg.payload)) {
+          await replaceMemories(msg.payload as Parameters<typeof replaceMemories>[0]);
+        }
+        return { ok: true, type: 'REPLACE_MEMORIES_ACK' };
+      case 'GET_MEMORIES': {
+        const list = await listMemories();
+        return { ok: true, type: 'MEMORIES', data: list };
       }
       default:
         return { ok: false, type: 'ERROR', error: `Unknown message type: ${msg.type}` };

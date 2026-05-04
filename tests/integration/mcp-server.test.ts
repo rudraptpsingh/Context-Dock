@@ -124,6 +124,11 @@ describe('MCP server: real protocol roundtrip via spawned binary', () => {
     writeFileSync(
       join(dataDir, 'conversations.json'),
       JSON.stringify({
+        memories: [
+          { id: 'mem-1', platform: 'chatgpt', text: 'I prefer Indian English spellings.', capturedAt: 1_700_000_500_000 },
+          { id: 'mem-2', platform: 'chatgpt', text: 'I live in Bangalore.', capturedAt: 1_700_000_600_000 },
+          { id: 'mem-3', platform: 'claude', text: 'Custom instructions: be concise.', capturedAt: 1_700_000_700_000 },
+        ],
         conversations: [
           {
             id: 'mcp-test-1',
@@ -180,10 +185,10 @@ describe('MCP server: real protocol roundtrip via spawned binary', () => {
       'resources/list',
       {},
     );
-    expect(r.resources).toHaveLength(2);
-    const titles = r.resources.map(x => x.name).sort();
+    const convResources = r.resources.filter(x => x.uri.startsWith('context-stash://conversation/'));
+    expect(convResources).toHaveLength(2);
+    const titles = convResources.map(x => x.name).sort();
     expect(titles).toEqual(['How to deploy a node binary', 'Recipe for sourdough']);
-    expect(r.resources[0].uri).toMatch(/^context-stash:\/\/conversation\//);
   });
 
   it('reads a single conversation via resources/read', async () => {
@@ -200,10 +205,54 @@ describe('MCP server: real protocol roundtrip via spawned binary', () => {
     expect(r.contents[0].text).toContain('bun build --compile');
   });
 
-  it('lists tools via tools/list and they include search_context + recent_conversation', async () => {
+  it('lists tools via tools/list and they include search_context + recent_conversation + search_memories', async () => {
     const r = await client.request<{ tools: Array<{ name: string }> }>('tools/list', {});
     const names = r.tools.map(t => t.name).sort();
-    expect(names).toEqual(['recent_conversation', 'search_context']);
+    expect(names).toEqual(['recent_conversation', 'search_context', 'search_memories']);
+  });
+
+  it('lists memory resources alongside conversation resources', async () => {
+    const r = await client.request<{ resources: Array<{ uri: string; name: string }> }>(
+      'resources/list',
+      {},
+    );
+    const memoryResources = r.resources.filter(x => x.uri.startsWith('context-stash://memories/'));
+    expect(memoryResources.map(x => x.uri).sort()).toEqual([
+      'context-stash://memories/chatgpt',
+      'context-stash://memories/claude',
+    ]);
+  });
+
+  it('reads a memories resource as Markdown with all entries listed', async () => {
+    const r = await client.request<{ contents: Array<{ uri: string; mimeType: string; text: string }> }>(
+      'resources/read',
+      { uri: 'context-stash://memories/chatgpt' },
+    );
+    expect(r.contents[0].mimeType).toBe('text/markdown');
+    expect(r.contents[0].text).toContain('# chatgpt memories');
+    expect(r.contents[0].text).toContain('Indian English');
+    expect(r.contents[0].text).toContain('Bangalore');
+  });
+
+  it('search_memories filters across all platforms and matches partial text', async () => {
+    const r = await client.request<{ content: Array<{ text: string }> }>('tools/call', {
+      name: 'search_memories',
+      arguments: { query: 'Bangalore' },
+    });
+    const matches = JSON.parse(r.content[0].text) as Array<{ text: string; platform: string }>;
+    expect(matches).toHaveLength(1);
+    expect(matches[0].platform).toBe('chatgpt');
+    expect(matches[0].text).toContain('Bangalore');
+  });
+
+  it('search_memories with platform filter narrows results', async () => {
+    const r = await client.request<{ content: Array<{ text: string }> }>('tools/call', {
+      name: 'search_memories',
+      arguments: { query: '', platform: 'claude' },
+    });
+    const matches = JSON.parse(r.content[0].text) as Array<{ platform: string }>;
+    expect(matches.every(m => m.platform === 'claude')).toBe(true);
+    expect(matches.length).toBe(1);
   });
 
   it('search_context returns matches across platforms', async () => {

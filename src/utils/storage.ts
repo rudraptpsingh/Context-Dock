@@ -374,6 +374,74 @@ export async function addMemory(platform: LLMPlatform, text: string): Promise<Me
   return entry;
 }
 
+// Same single-flight pattern as upsertConversation. Bulk memory imports run
+// concurrent fetches and would race on read-modify-write of the memories key
+// without serialisation.
+let memoriesChain: Promise<unknown> = Promise.resolve();
+
+export interface MemoryUpsertResult {
+  added: number;
+  updated: number;
+  skipped: number;
+}
+
+export function upsertMemories(
+  platform: LLMPlatform,
+  items: Array<{ text: string; platformId?: string; capturedAt?: number }>,
+): Promise<MemoryUpsertResult> {
+  const next = memoriesChain.then(() => upsertMemoriesLocked(platform, items));
+  memoriesChain = next.catch(() => undefined);
+  return next;
+}
+
+async function upsertMemoriesLocked(
+  platform: LLMPlatform,
+  items: Array<{ text: string; platformId?: string; capturedAt?: number }>,
+): Promise<MemoryUpsertResult> {
+  const existing = await getMemories();
+  // Dedup on (platform, text). Same content from the same platform = same
+  // memory; ChatGPT etc. can return the same item with different ids
+  // across pages.
+  const byKey = new Map<string, MemoryEntry>();
+  for (const m of existing) byKey.set(`${m.platform} ${m.text}`, m);
+
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+  for (const item of items) {
+    const trimmed = item.text.trim();
+    if (!trimmed) {
+      skipped++;
+      continue;
+    }
+    const key = `${platform} ${trimmed}`;
+    const prior = byKey.get(key);
+    if (prior) {
+      if (item.capturedAt && item.capturedAt > prior.capturedAt) {
+        byKey.set(key, { ...prior, capturedAt: item.capturedAt });
+        updated++;
+      } else {
+        skipped++;
+      }
+      continue;
+    }
+    byKey.set(key, {
+      id: crypto.randomUUID(),
+      platform,
+      text: trimmed,
+      capturedAt: item.capturedAt ?? Date.now(),
+    });
+    added++;
+  }
+  await setMemories([...byKey.values()].sort((a, b) => b.capturedAt - a.capturedAt));
+  return { added, updated, skipped };
+}
+
+export async function deleteMemory(id: string): Promise<void> {
+  const memories = await getMemories();
+  await setMemories(memories.filter(m => m.id !== id));
+}
+
 // ---------- Settings ----------
 
 export async function getSettings(): Promise<AppSettings> {

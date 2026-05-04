@@ -9,6 +9,7 @@ import {
   getProjects,
   getSettings,
   upsertConversation,
+  upsertMemories,
 } from '../utils/storage';
 import * as mcp from './mcpBridge';
 import { createLogger } from '../utils/logger';
@@ -606,6 +607,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     })();
     return false;
+  }
+
+  // ---------- Memory upsert (called by bulk-import content script) ----------
+
+  if (message.type === 'UPSERT_MEMORIES') {
+    (async () => {
+      const r = await upsertMemories(message.platform, message.items ?? []);
+      log.info('memories upserted', { platform: message.platform, ...r });
+      sendResponse(r);
+    })();
+    return true;
   }
 
   // ---------- Conversation harvest ----------

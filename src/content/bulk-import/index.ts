@@ -2,6 +2,7 @@ import type { LLMPlatform as Platform } from '../../types';
 import type { BulkImporter, ImportProgress } from './types';
 import chatgpt from './chatgpt';
 import claude from './claude';
+import { findMemoryFetcher } from './memories';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('bulk-import');
@@ -50,6 +51,14 @@ export async function runBulkImport(importer: BulkImporter, opts: RunImportOptio
   const list = await importer.listConversations();
   log.info('list', { platform: importer.platform, total: list.length });
 
+  // Fire memory capture in parallel with the conversation pass — they hit
+  // independent endpoints and we want both done by the time the user sees
+  // "complete". Failures here are non-fatal and never block conversations.
+  const memoriesPromise = importMemoriesForCurrentHost().catch(err => {
+    log.warn('memory capture failed', err instanceof Error ? err.message : String(err));
+    return null;
+  });
+
   let completed = 0;
   let failed = 0;
   const queue = [...list];
@@ -92,6 +101,7 @@ export async function runBulkImport(importer: BulkImporter, opts: RunImportOptio
     p.finally(() => inFlight.delete(p));
   }
   await Promise.all(inFlight);
+  await memoriesPromise;
 
   const result: ImportProgress = {
     platform: importer.platform,
@@ -103,6 +113,34 @@ export async function runBulkImport(importer: BulkImporter, opts: RunImportOptio
   };
   onProgress(result);
   return result;
+}
+
+async function importMemoriesForCurrentHost(): Promise<{ added: number; updated: number } | null> {
+  const fetcher = findMemoryFetcher(location.hostname);
+  if (!fetcher) return null;
+  const items = await fetcher.fetchMemories(async () => {
+    // ChatGPT memories need an OAuth-style accessToken from /api/auth/session.
+    // Claude doesn't, but the helper takes a lazy getter so we just probe.
+    if (fetcher.platform === 'chatgpt') {
+      try {
+        const r = await fetch('/api/auth/session', { credentials: 'include' });
+        if (!r.ok) return null;
+        const j = (await r.json()) as { accessToken?: string };
+        return j.accessToken ?? null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
+  if (!items.length) return null;
+  log.info('memories fetched', { platform: fetcher.platform, count: items.length });
+  const r = (await chrome.runtime.sendMessage({
+    type: 'UPSERT_MEMORIES',
+    platform: fetcher.platform,
+    items,
+  })) as { added?: number; updated?: number };
+  return { added: r?.added ?? 0, updated: r?.updated ?? 0 };
 }
 
 // Content-script message handler: listens for BULK_IMPORT_START (from the
