@@ -47,6 +47,7 @@ export default function ConversationList({
       .filter(c => {
         if (!q) return true;
         if (c.title.toLowerCase().includes(q)) return true;
+        if (c.summary?.toLowerCase().includes(q)) return true;
         if (c.tags.some(t => t.toLowerCase().includes(q))) return true;
         return c.turns.some(t => t.content.toLowerCase().includes(q));
       })
@@ -106,6 +107,14 @@ export default function ConversationList({
                 title="Open conversation"
               >
                 <div className="text-sm font-semibold text-slate-800 truncate">{conv.title}</div>
+                {conv.summary && (
+                  <div
+                    className="text-[12px] text-slate-500 mt-0.5 line-clamp-2"
+                    title={conv.summary}
+                  >
+                    {conv.summary}
+                  </div>
+                )}
                 <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2">
                   <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">
                     {PLATFORM_LABEL[conv.platform]}

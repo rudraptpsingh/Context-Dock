@@ -13,6 +13,8 @@ import {
 import * as mcp from './mcpBridge';
 import { createLogger } from '../utils/logger';
 import { trace } from '../utils/tracing';
+import { summarizeConversation, isSummarizerReady } from '../utils/builtinAI';
+import { updateConversation } from '../utils/storage';
 
 const log = createLogger('background');
 
@@ -158,6 +160,34 @@ chrome.runtime.onStartup.addListener(() => void createContextMenus());
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.projects) scheduleMenuRebuild();
 });
+
+// ---------- On-device summarisation (Chrome/Edge built-in AI) ----------
+
+async function summarizeAndStore(conversationId: string): Promise<void> {
+  try {
+    if (!(await isSummarizerReady())) return;
+    const conversations = await getConversations();
+    const conv = conversations.find(c => c.id === conversationId);
+    if (!conv) return;
+    // Build a compact transcript so we don't exceed the model's input budget.
+    // Take up to ~6000 chars of the most recent turns (the model handles
+    // overrun gracefully but trimming is faster).
+    const text = conv.turns
+      .map(t => `${t.role === 'user' ? 'USER' : 'ASSISTANT'}: ${t.content}`)
+      .join('\n\n')
+      .slice(0, 6_000);
+    if (!text) return;
+    const summary = await summarizeConversation(text);
+    if (!summary) return;
+    await updateConversation(conv.id, {
+      summary,
+      summaryGeneratedAt: Date.now(),
+    });
+    log.info('auto-summary', { id: conv.id, length: summary.length });
+  } catch (err) {
+    log.debug('summarizeAndStore failed', err instanceof Error ? err.message : String(err));
+  }
+}
 
 // ---------- Toast helper (injected into pages) ----------
 
@@ -523,6 +553,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Refresh-all: re-runs the bulk importer once per platform we already have
+  // conversations for. The importer's upsert path is already idempotent — it
+  // matches on (platform, platformConversationId) and replaces turns.
+  if (message.type === 'REFRESH_ALL_CONVERSATIONS') {
+    (async () => {
+      const all = await getConversations();
+      const platforms = Array.from(new Set(all.map(c => c.platform))).filter(p =>
+        ['chatgpt', 'claude'].includes(p),
+      );
+      const results: Array<{ platform: string; ok: boolean; error?: string }> = [];
+      for (const platform of platforms) {
+        try {
+          const r = (await chrome.runtime.sendMessage({
+            type: 'START_BULK_IMPORT',
+            platform,
+          })) as { ok: boolean; error?: string };
+          results.push({ platform, ok: !!r?.ok, error: r?.error });
+        } catch (err) {
+          results.push({ platform, ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      sendResponse({ ok: true, results });
+    })();
+    return true;
+  }
+
   if (message.type === 'CREATE_PROJECT_FROM_POPUP') {
     (async () => {
       const name = String(message.name ?? '').trim();
@@ -576,6 +632,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         turns: result.conversation.turns.length,
       });
       chrome.runtime.sendMessage({ type: 'REFRESH_DATA' }).catch(() => {});
+      // Fire-and-forget on-device summarisation when the content changed.
+      // Non-blocking; storage already reflects the harvested turns.
+      if (result.changed || result.isNew) void summarizeAndStore(result.conversation.id);
       // Push snapshot to MCP bridge if connected
       if (mcp.isConnected()) {
         mcp.send({

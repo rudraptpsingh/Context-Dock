@@ -56,6 +56,11 @@ export interface Conversation {
   lastSyncedAt: number;
   autoSync: boolean;
   contentHash: string;                 // for dedup + change detection
+  // Optional, AI-generated. Auto-populated by the on-device Summarizer API
+  // (Chrome/Edge built-in AI) when content changes; null when the API is
+  // unavailable or the user declined it.
+  summary?: string;
+  summaryGeneratedAt?: number;
 }
 
 // ---------- Memory entries (ChatGPT Memory, Claude Memory, etc.) ----------
