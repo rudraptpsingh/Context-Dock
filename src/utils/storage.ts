@@ -121,6 +121,28 @@ export async function addProject(name: string): Promise<Project> {
   return newProject;
 }
 
+/**
+ * Returns the currently-active project, creating one named "Quick Stash" if
+ * the user doesn't have any yet OR if the active id is dangling. The result
+ * is the safe target for any "save right now" action — clip selection, page
+ * summary, dock save — so users never hit a "no project" dead end on first
+ * use. The flag tells the caller whether a project was just created so they
+ * can show a more informative toast.
+ */
+export async function ensureActiveProject(): Promise<{ project: Project; created: boolean }> {
+  const data = await getStorageData();
+  const existing = data.projects.find(p => p.id === data.activeProjectId);
+  if (existing) return { project: existing, created: false };
+  if (data.projects.length) {
+    // We have projects but no valid active id — pick the first one.
+    const first = data.projects[0];
+    await setActiveProjectId(first.id);
+    return { project: first, created: false };
+  }
+  const project = await addProject('Quick Stash');
+  return { project, created: true };
+}
+
 export async function deleteProject(id: string): Promise<void> {
   const data = await getStorageData();
   const projects = data.projects.filter(p => p.id !== id);

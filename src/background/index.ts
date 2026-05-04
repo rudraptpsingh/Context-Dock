@@ -3,6 +3,8 @@ import {
   addSnippetToProject,
   getActiveProject,
   getActiveProjectId,
+  setActiveProjectId,
+  ensureActiveProject,
   getConversations,
   getProjects,
   getSettings,
@@ -218,19 +220,19 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     info.selectionText
   ) {
     let targetProjectId: string | null = null;
+    let targetProjectName: string | null = null;
+    let createdNew = false;
     if (info.menuItemId === 'save-selection-active') {
-      targetProjectId = await getActiveProjectId();
+      const ensured = await ensureActiveProject();
+      targetProjectId = ensured.project.id;
+      targetProjectName = ensured.project.name;
+      createdNew = ensured.created;
     } else if (typeof info.menuItemId === 'string') {
       targetProjectId = info.menuItemId.replace('save-selection-project-', '');
     }
-    if (!targetProjectId) {
-      if (tab?.id) {
-        chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => alert('Please open Context Stash and create a project first.'),
-        });
-      }
-      return;
+    if (!targetProjectId) return;
+    if (createdNew && tab?.id && targetProjectName) {
+      showPageToast(tab.id, `Created project "${targetProjectName}" — saving here.`);
     }
     if (tab?.id) {
       chrome.scripting.executeScript({
@@ -401,19 +403,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'PAGE_CONTENT') {
     (async () => {
-      const activeProjectId = await getActiveProjectId();
-      if (!activeProjectId) {
-        sendResponse({ success: false, error: 'No active project' });
-        return;
-      }
-      await addSnippetToProject(activeProjectId, {
+      const { project, created } = await ensureActiveProject();
+      await addSnippetToProject(project.id, {
         type: 'page_summary',
         content: message.content.slice(0, 10000),
         sourceUrl: message.url,
         sourceTitle: message.title,
       });
+      if (sender.tab?.id) {
+        const verb = created ? `Created "${project.name}", clipped page` : `Clipped page to ${project.name}`;
+        showPageToast(sender.tab.id, `✓ ${verb}`);
+      }
       chrome.runtime.sendMessage({ type: 'REFRESH_DATA' }).catch(() => {});
-      sendResponse({ success: true });
+      sendResponse({ success: true, projectId: project.id, projectName: project.name });
     })();
     return true;
   }
@@ -455,17 +457,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'DOCK_SAVE_SELECTION') {
     (async () => {
-      const activeProjectId = await getActiveProjectId();
-      if (!activeProjectId) {
-        if (sender.tab?.id) showPageToast(sender.tab.id, 'No active project. Pick one in the side panel.');
-        return;
-      }
-      await addSnippetToProject(activeProjectId, {
+      const { project, created } = await ensureActiveProject();
+      await addSnippetToProject(project.id, {
         type: 'selection',
         content: String(message.payload?.text ?? ''),
         sourceUrl: String(message.payload?.sourceUrl ?? ''),
         sourceTitle: String(message.payload?.sourceTitle ?? ''),
       });
+      if (sender.tab?.id) {
+        const verb = created ? `Created "${project.name}", saved` : `Saved to ${project.name}`;
+        showPageToast(sender.tab.id, `✓ ${verb}`);
+      }
       chrome.runtime.sendMessage({ type: 'REFRESH_DATA' }).catch(() => {});
     })();
     return false;
@@ -517,6 +519,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    })();
+    return true;
+  }
+
+  if (message.type === 'CREATE_PROJECT_FROM_POPUP') {
+    (async () => {
+      const name = String(message.name ?? '').trim();
+      if (!name) {
+        sendResponse({ ok: false, error: 'name required' });
+        return;
+      }
+      const project = await addProject(name);
+      await setActiveProjectId(project.id);
+      chrome.runtime.sendMessage({ type: 'REFRESH_DATA' }).catch(() => {});
+      sendResponse({ ok: true, project: { id: project.id, name: project.name } });
     })();
     return true;
   }

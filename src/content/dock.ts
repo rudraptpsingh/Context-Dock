@@ -171,9 +171,11 @@ export function mountDock() {
     const color = state.activeProject ? colorForId(state.activeProject.id) : '#64748b';
     dot.style.setProperty('--cs-color', state.activeProject?.color ?? color);
     dot.classList.toggle('synced', state.conversationKnown);
+    // Always show the platform — show project name when set, else gentle "no
+    // project yet" hint so the user knows the next clip will auto-create one.
     label.textContent = state.activeProject
       ? `${adapter!.label} · ${state.activeProject.name}`
-      : `${adapter!.label} · Context Stash`;
+      : `${adapter!.label} · Quick Stash on save`;
   }
 
   function showToast(text: string) {

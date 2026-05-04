@@ -29,6 +29,56 @@ test('floating dock mounts on a chat page', async ({ context }) => {
   expect(dockText).toContain('ChatGPT');
 });
 
+test('saving a snippet with no project auto-creates "Quick Stash" and saves into it', async ({
+  context,
+  extensionId,
+}) => {
+  // We test the BACKGROUND's auto-create handling directly — sending the same
+  // DOCK_SAVE_SELECTION message the dock fires. That isolates the
+  // ensureActiveProject behaviour from page-selection plumbing.
+  const panel = await context.newPage();
+  await panel.goto(`chrome-extension://${extensionId}/src/sidepanel/index.html`);
+
+  // Storage starts clean (fresh persistent profile per test).
+  const initial = await panel.evaluate(async () => chrome.storage.local.get('projects'));
+  expect(((initial.projects as unknown[]) ?? []).length).toBe(0);
+
+  await panel.evaluate(async () => {
+    chrome.runtime
+      .sendMessage({
+        type: 'DOCK_SAVE_SELECTION',
+        payload: {
+          text: 'Captured text from a real page',
+          sourceUrl: 'https://example.com/article',
+          sourceTitle: 'Example article',
+        },
+      })
+      .catch(() => undefined);
+  });
+
+  const result = await panel.evaluate(async () => {
+    const start = Date.now();
+    while (Date.now() - start < 8_000) {
+      const r = await chrome.storage.local.get(['projects', 'activeProjectId']);
+      const projects =
+        (r.projects as Array<{ id: string; name: string; snippets: Array<{ content: string }> }>) ?? [];
+      if (projects.length === 1 && projects[0].snippets.length > 0) {
+        return {
+          name: projects[0].name,
+          snippet: projects[0].snippets[0].content,
+          activeMatches: r.activeProjectId === projects[0].id,
+        };
+      }
+      await new Promise(res => setTimeout(res, 200));
+    }
+    return null;
+  });
+  expect(result).not.toBeNull();
+  expect(result!.name).toBe('Quick Stash');
+  expect(result!.snippet).toBe('Captured text from a real page');
+  expect(result!.activeMatches).toBe(true);
+});
+
 test('dock harvest button triggers a HARVEST_CONVERSATION write', async ({ context, extensionId }) => {
   await context.route(/^https?:\/\/chatgpt\.com\//, async route => {
     if (route.request().resourceType() !== 'document') {

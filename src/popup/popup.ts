@@ -140,32 +140,45 @@ async function init() {
   // Project switcher.
   const projectsList = $('cs-pop-projects');
   projectsList.innerHTML = '';
-  if (!projects.length) {
-    const empty = document.createElement('div');
-    empty.className = 'meta';
-    empty.style.padding = '6px 10px';
-    empty.textContent = 'No projects yet — create one in the side panel';
-    projectsList.appendChild(empty);
-  } else {
-    for (const p of projects) {
-      const btn = document.createElement('button');
-      btn.className = 'row';
-      const color = p.color ?? colorForId(p.id);
-      btn.innerHTML = `
-        <span style="display:flex;align-items:center;gap:8px;">
-          <span style="width:8px;height:8px;border-radius:999px;background:${color}"></span>
-          ${escapeHtml(p.name)}
-        </span>
-        ${p.id === activeProjectId ? '<span class="meta">active</span>' : ''}
-      `;
-      btn.addEventListener('click', async () => {
-        await chrome.storage.local.set({ activeProjectId: p.id });
-        showToast(`Active: ${p.name}`);
-        setTimeout(() => window.close(), 800);
-      });
-      projectsList.appendChild(btn);
-    }
+  for (const p of projects) {
+    const btn = document.createElement('button');
+    btn.className = 'row';
+    const color = p.color ?? colorForId(p.id);
+    btn.innerHTML = `
+      <span style="display:flex;align-items:center;gap:8px;">
+        <span style="width:8px;height:8px;border-radius:999px;background:${color}"></span>
+        ${escapeHtml(p.name)}
+      </span>
+      ${p.id === activeProjectId ? '<span class="meta">active</span>' : ''}
+    `;
+    btn.addEventListener('click', async () => {
+      await chrome.storage.local.set({ activeProjectId: p.id });
+      showToast(`Active: ${p.name}`);
+      setTimeout(() => window.close(), 800);
+    });
+    projectsList.appendChild(btn);
   }
+  // Always-available inline "+ New project" entry — no dead-end empty state.
+  const newBtn = document.createElement('button');
+  newBtn.className = 'row';
+  newBtn.innerHTML = `
+    <span style="display:flex;align-items:center;gap:8px;color:#2563eb;">
+      <span style="font-weight:600;">+ New project</span>
+    </span>
+  `;
+  newBtn.addEventListener('click', async () => {
+    const name = window.prompt('Project name:');
+    if (!name?.trim()) return;
+    const r = (await chrome.runtime.sendMessage({
+      type: 'CREATE_PROJECT_FROM_POPUP',
+      name: name.trim(),
+    })) as { ok: boolean; project?: { id: string; name: string } };
+    if (r?.ok && r.project) {
+      showToast(`Active: ${r.project.name}`);
+      setTimeout(() => window.close(), 800);
+    }
+  });
+  projectsList.appendChild(newBtn);
 
   $('cs-pop-settings').addEventListener('click', async () => {
     const winId = tab?.windowId;
