@@ -21,6 +21,21 @@ let lastEmittedConvId: string | null = null;
 let autoSyncEnabledForConv: Map<string, boolean> = new Map();
 let autoSyncEnabledMaster = false;
 
+function surfaceUserError(adapter: PlatformAdapter, msg: string) {
+  // Render a small in-page toast so the user sees what went wrong without
+  // having to open DevTools. Best-effort — fails silently if injection blocked.
+  try {
+    const toast = document.createElement('div');
+    toast.style.cssText =
+      'position:fixed;bottom:24px;right:24px;background:#0f172a;color:#fff;padding:12px 16px;border-radius:8px;font:14px/1.4 Inter,system-ui,sans-serif;z-index:2147483647;box-shadow:0 10px 40px rgba(0,0,0,0.25);max-width:340px;';
+    toast.textContent = `Context Stash · ${adapter.label}: ${msg}`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 6000);
+  } catch {
+    /* ignore */
+  }
+}
+
 function debounce(fn: () => void, ms: number) {
   if (pendingTimer !== null) {
     window.clearTimeout(pendingTimer);
@@ -43,6 +58,17 @@ function emit(adapter: PlatformAdapter, opts: { force?: boolean } = {}) {
   if (!convId) {
     span.setAttribute('skip', 'no-conv-id');
     span.end('ok');
+    if (opts.force) {
+      log.warn('user-initiated harvest skipped: no conversation id detected', {
+        platform: adapter.platform,
+        host: window.location.hostname,
+        path: window.location.pathname,
+      });
+      surfaceUserError(
+        adapter,
+        'Open a conversation first — Context Stash could not detect a conversation id on this page.',
+      );
+    }
     return;
   }
   const turns = adapter.extractTurns(document);
@@ -50,6 +76,16 @@ function emit(adapter: PlatformAdapter, opts: { force?: boolean } = {}) {
   if (!turns.length) {
     span.setAttribute('skip', 'no-turns');
     span.end('ok');
+    if (opts.force) {
+      log.warn('user-initiated harvest skipped: no turns extracted', {
+        platform: adapter.platform,
+        convId,
+      });
+      surfaceUserError(
+        adapter,
+        'Could not find any messages on this page. The site may have changed its layout — please report this so we can update the selectors.',
+      );
+    }
     return;
   }
 
@@ -130,12 +166,29 @@ function startObserving(adapter: PlatformAdapter) {
 }
 
 function init() {
+  // Mark the page so the background's diagnostic probe can confirm we ran.
+  (window as unknown as { __cs_harvester__?: { host: string; ready: boolean } }).__cs_harvester__ = {
+    host: window.location.hostname,
+    ready: false,
+  };
   const adapter = findAdapter();
   if (!adapter) {
-    log.debug('no-adapter', { host: window.location.hostname });
+    log.warn('no-adapter', { host: window.location.hostname });
+    // Still register a listener so the background can hear us and report
+    // a useful error instead of a generic "page can't be harvested" toast.
+    chrome.runtime.onMessage.addListener((message: { type?: string }) => {
+      if (message?.type === 'HARVEST_REQUEST') {
+        log.warn('harvest requested but no adapter matched', { host: window.location.hostname });
+      }
+    });
     return;
   }
   log.info('init', { platform: adapter.platform, host: window.location.hostname });
+  (window as unknown as { __cs_harvester__: { host: string; ready: boolean; platform: string } }).__cs_harvester__ = {
+    host: window.location.hostname,
+    ready: true,
+    platform: adapter.platform,
+  };
 
   refreshAutoSyncFlags(adapter);
   startObserving(adapter);

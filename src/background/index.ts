@@ -260,11 +260,39 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   // HARVEST CONVERSATION (user-initiated)
   if (info.menuItemId === 'harvest-conversation' && tab?.id) {
-    chrome.tabs
-      .sendMessage(tab.id, { type: 'HARVEST_REQUEST' })
-      .catch(() =>
-        showPageToast(tab.id!, 'Context Stash: this page does not support harvesting.'),
-      );
+    const tabId = tab.id;
+    chrome.tabs.sendMessage(tabId, { type: 'HARVEST_REQUEST' }).catch(async err => {
+      log.warn('harvest sendMessage failed', err instanceof Error ? err.message : String(err));
+      // Fast diagnostic: try to inject a probe via the activeTab/scripting
+      // permission. If THAT also fails, it's a site-access issue. If it
+      // succeeds but the content script wasn't there, the manifest didn't
+      // match this URL.
+      let diagnosis = 'Context Stash could not reach this page.';
+      try {
+        const [result] = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => ({
+            href: location.href,
+            host: location.hostname,
+            ready: document.readyState,
+            harvesterAlive: !!(window as unknown as { __cs_harvester__?: boolean }).__cs_harvester__,
+          }),
+        });
+        const probe = result?.result;
+        if (probe?.harvesterAlive) {
+          diagnosis = 'Harvester loaded but did not respond — please refresh the tab and try again.';
+        } else {
+          diagnosis =
+            'Content script not injected. In edge://extensions or chrome://extensions, open Context Stash → Details → Site access → set to "On all sites", then refresh this tab.';
+        }
+        log.warn('harvest diagnostic', probe);
+      } catch (probeErr) {
+        log.warn('probe also failed', probeErr instanceof Error ? probeErr.message : String(probeErr));
+        diagnosis =
+          'Site access blocked. In edge://extensions or chrome://extensions, open Context Stash → Details → Site access → set to "On all sites", then refresh this tab.';
+      }
+      showPageToast(tabId, `Context Stash: ${diagnosis}`);
+    });
     return;
   }
 
