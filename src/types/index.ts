@@ -65,6 +65,9 @@ export interface Conversation {
   // shows an "updated" badge when lastSyncedAt > lastViewedAt so auto-sync
   // changes are visible without requiring a manual diff.
   lastViewedAt?: number;
+  // User-pinned conversations sort to the top of the list regardless of
+  // recency. Persisted alongside the conversation so they survive imports.
+  pinned?: boolean;
 }
 
 // ---------- Memory entries (ChatGPT Memory, Claude Memory, etc.) ----------

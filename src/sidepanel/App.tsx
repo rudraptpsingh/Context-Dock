@@ -11,6 +11,7 @@ import BulkImportButton from './components/BulkImportButton';
 import BulkImportStatus from './components/BulkImportStatus';
 import MemoriesPanel from './components/MemoriesPanel';
 import SettingsPanel from './components/SettingsPanel';
+import OnboardingModal from './components/OnboardingModal';
 import { useBulkImportProgress } from './hooks/useBulkImport';
 import ConversationDetail from './components/ConversationDetail';
 import McpSetupWizard from './components/McpSetupWizard';
@@ -184,6 +185,7 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col bg-white text-slate-900 font-sans antialiased">
+      <OnboardingModal />
       {tab === 'snippets' || !openConversation ? (
         <Header
           activeProject={activeProject}
@@ -202,7 +204,7 @@ export default function App() {
             onClick={() => setTab('snippets')}
             className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
               tab === 'snippets'
-                ? 'border-blue-600 text-blue-700'
+                ? 'border-brand-600 text-brand-700'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -212,7 +214,7 @@ export default function App() {
             onClick={() => setTab('conversations')}
             className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
               tab === 'conversations'
-                ? 'border-blue-600 text-blue-700'
+                ? 'border-brand-600 text-brand-700'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -227,7 +229,7 @@ export default function App() {
             onClick={() => setTab('settings')}
             className={`px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
               tab === 'settings'
-                ? 'border-blue-600 text-blue-700'
+                ? 'border-brand-600 text-brand-700'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
             title="Settings & diagnostics"
@@ -306,6 +308,7 @@ export default function App() {
                   }}
                   onToggleAutoSync={conversationsApi.setAutoSync}
                   onDelete={conversationsApi.remove}
+                  onTogglePin={(id, pinned) => conversationsApi.update(id, { pinned })}
                 />
               </>
             )}
