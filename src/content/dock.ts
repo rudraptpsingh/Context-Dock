@@ -148,7 +148,8 @@ export function mountDock() {
     <div class="label" id="cs-label">Context Stash</div>
     <div class="actions" id="cs-actions">
       <button class="action" data-action="harvest">Harvest</button>
-      <button class="action" data-action="save-selection">Clip selection</button>
+      <button class="action" data-action="save-selection">Clip</button>
+      <button class="action" data-action="inject">+ Context</button>
       <button class="action" data-action="open-panel">Open</button>
       <button class="close" data-action="close" aria-label="Hide dock for this tab">×</button>
     </div>
@@ -228,10 +229,125 @@ export function mountDock() {
         .catch(() => undefined);
       showToast('Saved to active project');
     }
+    if (action === 'inject') {
+      void openInjectPopover();
+    }
     if (action === 'open-panel') {
       chrome.runtime.sendMessage({ type: 'DOCK_OPEN_PANEL' }).catch(() => undefined);
     }
   });
+
+  // ---------- Inject popover ----------
+  //
+  // Opens an in-page popover (rendered into the same Shadow DOM root) that
+  // shows the top-N most relevant pieces of context for what the user has
+  // currently typed into the chat input. One click pastes a formatted
+  // block into that input. Entirely client-side BM25; no server roundtrip.
+
+  async function openInjectPopover() {
+    const { findChatInput, insertIntoInput } = await import('../utils/chatInput');
+    const input = findChatInput(document, adapter!.platform);
+    if (!input) {
+      showToast('No chat input found');
+      return;
+    }
+    // Use whatever's currently in the input as the query. If empty, fall
+    // back to the page title so the user still sees something useful.
+    const queryText =
+      ((input as HTMLTextAreaElement).value ?? input.textContent ?? '').trim() ||
+      document.title;
+
+    const r = (await chrome.runtime.sendMessage({
+      type: 'DOCK_RANK_CONTEXT',
+      query: queryText,
+    })) as { ok: boolean; items?: Array<{ score: number; kind: string; title: string; content: string }> };
+    if (!r?.ok || !r.items?.length) {
+      showToast('No context matches this prompt yet');
+      return;
+    }
+
+    // Render a tiny picker into the same shadow root.
+    const old = root.querySelector('#cs-injector');
+    old?.remove();
+    const picker = document.createElement('div');
+    picker.id = 'cs-injector';
+    picker.style.cssText = `
+      position: fixed; top: 56px; right: 12px; z-index: 2147483646;
+      width: 320px; max-height: 60vh; overflow: auto;
+      background: rgba(15, 23, 42, 0.96); color: #f8fafc;
+      border-radius: 12px; padding: 8px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.28);
+      backdrop-filter: blur(10px);
+      font: 12px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    `;
+    picker.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px 8px;">
+        <span style="font-weight:600;">Inject context</span>
+        <button id="cs-injector-close" style="background:transparent;border:0;color:#94a3b8;cursor:pointer;font-size:14px;">×</button>
+      </div>
+      <div id="cs-injector-list"></div>
+      <div style="display:flex;justify-content:flex-end;gap:6px;padding:8px 4px 0;">
+        <button id="cs-injector-confirm" style="background:#2563eb;color:#fff;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;font:inherit;">Insert</button>
+      </div>
+    `;
+    root.appendChild(picker);
+
+    const list = picker.querySelector('#cs-injector-list') as HTMLDivElement;
+    const checked = new Set<number>([0, 1, 2].filter(i => i < r.items!.length));
+    r.items!.forEach((item, i) => {
+      const row = document.createElement('label');
+      row.style.cssText =
+        'display:flex;align-items:flex-start;gap:8px;padding:6px;border-radius:6px;cursor:pointer;';
+      row.addEventListener('mouseenter', () => (row.style.background = 'rgba(255,255,255,0.06)'));
+      row.addEventListener('mouseleave', () => (row.style.background = ''));
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.checked = checked.has(i);
+      check.style.marginTop = '2px';
+      check.addEventListener('change', () => {
+        if (check.checked) checked.add(i); else checked.delete(i);
+      });
+      const meta = document.createElement('div');
+      meta.style.flex = '1';
+      const dim = '#94a3b8';
+      meta.innerHTML = `
+        <div style="font-size:10px;color:${dim};text-transform:uppercase;letter-spacing:.04em;">${item.kind}</div>
+        <div style="font-weight:600;color:#f8fafc;">${escapeHtml(item.title || '(untitled)')}</div>
+        <div style="color:#cbd5e1;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(item.content.slice(0, 240))}</div>
+      `;
+      row.append(check, meta);
+      list.appendChild(row);
+    });
+
+    (picker.querySelector('#cs-injector-close') as HTMLButtonElement).addEventListener('click', () => picker.remove());
+    (picker.querySelector('#cs-injector-confirm') as HTMLButtonElement).addEventListener('click', () => {
+      const selected = [...checked].sort().map(i => r.items![i]);
+      if (!selected.length) {
+        picker.remove();
+        return;
+      }
+      const block = formatContextBlock(selected);
+      insertIntoInput(input, block);
+      picker.remove();
+      showToast(`Injected ${selected.length} item${selected.length === 1 ? '' : 's'}`);
+    });
+  }
+
+  function formatContextBlock(items: Array<{ kind: string; title: string; content: string }>): string {
+    const lines: string[] = [];
+    lines.push('--- Context from Context Stash ---');
+    for (const item of items) {
+      lines.push(`[${item.kind}] ${item.title}`.trim());
+      lines.push(item.content.trim());
+      lines.push('');
+    }
+    lines.push('--- end ---');
+    return lines.join('\n');
+  }
+
+  function escapeHtml(s: string): string {
+    return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+  }
 
   // Auto-collapse when clicking outside.
   document.addEventListener('click', e => {

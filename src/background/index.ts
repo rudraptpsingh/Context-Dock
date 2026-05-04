@@ -15,7 +15,8 @@ import * as mcp from './mcpBridge';
 import { createLogger } from '../utils/logger';
 import { trace } from '../utils/tracing';
 import { summarizeConversation, isSummarizerReady } from '../utils/builtinAI';
-import { updateConversation } from '../utils/storage';
+import { updateConversation, getMemories } from '../utils/storage';
+import { rankCandidates, type Candidate } from '../utils/ranker';
 
 const log = createLogger('background');
 
@@ -591,6 +592,80 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await setActiveProjectId(project.id);
       chrome.runtime.sendMessage({ type: 'REFRESH_DATA' }).catch(() => {});
       sendResponse({ ok: true, project: { id: project.id, name: project.name } });
+    })();
+    return true;
+  }
+
+  // Bidirectional inject: rank candidate context for the user's current
+  // prompt. Runs in the SW (no DOM dependency) and returns the top-N items
+  // for the dock to render in its picker.
+  if (message.type === 'DOCK_RANK_CONTEXT') {
+    (async () => {
+      try {
+        const [projects, conversations, memories] = await Promise.all([
+          getProjects(),
+          getConversations(),
+          getMemories(),
+        ]);
+        const activeId = await getActiveProjectId();
+        const candidates: Candidate[] = [];
+        for (const p of projects) {
+          for (const s of p.snippets) {
+            candidates.push({
+              kind: 'snippet',
+              id: s.id,
+              projectId: p.id,
+              projectName: p.name,
+              content: s.content,
+              label: s.label,
+              sourceUrl: s.sourceUrl,
+            });
+          }
+        }
+        // Recent assistant turns (last 30 days), to surface "I asked Claude
+        // about this last week" answers.
+        const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        for (const conv of conversations) {
+          if (conv.lastSyncedAt < thirtyDaysAgo) continue;
+          for (const t of conv.turns) {
+            if (t.role !== 'assistant') continue;
+            candidates.push({
+              kind: 'turn',
+              conversationId: conv.id,
+              conversationTitle: conv.title,
+              platform: conv.platform,
+              content: t.content,
+              role: t.role,
+            });
+          }
+        }
+        for (const m of memories) {
+          candidates.push({ kind: 'memory', id: m.id, platform: m.platform, content: m.text });
+        }
+        // Lightly favour items from the active project.
+        const ranked = rankCandidates(message.query ?? '', candidates, {
+          limit: 8,
+          minScore: 0.3,
+          weights: { snippet: 1.2, memory: 1.1, turn: 1 },
+        }).map(r => {
+          const isActive =
+            r.candidate.kind === 'snippet' && r.candidate.projectId === activeId;
+          return {
+            score: r.score,
+            kind: r.candidate.kind,
+            title:
+              r.candidate.kind === 'snippet'
+                ? `${r.candidate.label ?? r.candidate.projectName}${isActive ? ' · active' : ''}`
+                : r.candidate.kind === 'turn'
+                  ? r.candidate.conversationTitle
+                  : `${r.candidate.platform} memory`,
+            content: r.candidate.content,
+          };
+        });
+        sendResponse({ ok: true, items: ranked });
+      } catch (err) {
+        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
     })();
     return true;
   }

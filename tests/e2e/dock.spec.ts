@@ -79,6 +79,101 @@ test('saving a snippet with no project auto-creates "Quick Stash" and saves into
   expect(result!.activeMatches).toBe(true);
 });
 
+test('dock "+ Context" inject flow ranks snippets and inserts into a textarea', async ({
+  context,
+  extensionId,
+}) => {
+  // Custom mock page with a chat input + relevant snippet content already
+  // seeded. We pre-load chrome.storage.local in the side panel so the
+  // background's ranker has candidates.
+  const INJECT_HTML = `<!doctype html><html><head><title>ChatGPT</title></head><body>
+    <main>
+      <textarea id="prompt-textarea" placeholder="Message"></textarea>
+    </main>
+  </body></html>`;
+  await context.route(/^https?:\/\/chatgpt\.com\//, async route => {
+    if (route.request().resourceType() !== 'document') {
+      return route.fulfill({ status: 404, body: '' });
+    }
+    await route.fulfill({ status: 200, contentType: 'text/html', body: INJECT_HTML });
+  });
+
+  // Seed snippets via the side panel's storage so the ranker has data.
+  const seedPanel = await context.newPage();
+  await seedPanel.goto(`chrome-extension://${extensionId}/src/sidepanel/index.html`);
+  await seedPanel.evaluate(async () => {
+    const projects = [
+      {
+        id: 'p1',
+        name: 'Sourdough',
+        createdAt: 0,
+        snippets: [
+          {
+            id: 's1',
+            type: 'note',
+            content: 'sourdough hydration: 78% works well for an open crumb',
+            label: 'hydration tip',
+            timestamp: 0,
+          },
+          {
+            id: 's2',
+            type: 'note',
+            content: 'completely unrelated content about car engines',
+            timestamp: 0,
+          },
+        ],
+      },
+    ];
+    await chrome.storage.local.set({ schemaVersion: 2, projects, activeProjectId: 'p1' });
+  });
+  await seedPanel.close();
+
+  const tab = await context.newPage();
+  await tab.goto('https://chatgpt.com/c/inject-test');
+  await tab.waitForLoadState('domcontentloaded');
+  await tab.waitForFunction(
+    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.dock'),
+    null,
+    { timeout: 8_000 },
+  );
+
+  // Type a prompt that uniquely matches the relevant snippet.
+  await tab.evaluate(() => {
+    const ta = document.querySelector<HTMLTextAreaElement>('#prompt-textarea')!;
+    ta.value = 'sourdough hydration percentage';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+  // Open dock and click "+ Context".
+  await tab.evaluate(() => {
+    const root = document.getElementById('cs-dock-root')?.shadowRoot;
+    (root?.querySelector('.dock') as HTMLElement)?.click();
+    (root?.querySelector('button[data-action="inject"]') as HTMLButtonElement)?.click();
+  });
+
+  // The picker renders inside the same shadow root.
+  await tab.waitForFunction(
+    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('#cs-injector'),
+    null,
+    { timeout: 5_000 },
+  );
+
+  // Confirm and verify the textarea now contains the context block.
+  await tab.evaluate(() => {
+    const root = document.getElementById('cs-dock-root')?.shadowRoot;
+    (root?.querySelector('#cs-injector-confirm') as HTMLButtonElement)?.click();
+  });
+
+  const textareaContent = await tab.evaluate(() => {
+    return document.querySelector<HTMLTextAreaElement>('#prompt-textarea')!.value;
+  });
+  expect(textareaContent).toContain('Context from Context Stash');
+  expect(textareaContent).toContain('hydration');
+  expect(textareaContent).toContain('sourdough hydration percentage');
+  // The unrelated snippet should NOT appear in the injected content.
+  expect(textareaContent).not.toContain('car engines');
+});
+
 test('dock harvest button triggers a HARVEST_CONVERSATION write', async ({ context, extensionId }) => {
   await context.route(/^https?:\/\/chatgpt\.com\//, async route => {
     if (route.request().resourceType() !== 'document') {
