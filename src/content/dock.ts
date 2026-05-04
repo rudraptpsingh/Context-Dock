@@ -27,7 +27,9 @@ interface DockState {
   dismissed: boolean;
 }
 
-const COLORS = ['#2563eb', '#16a34a', '#db2777', '#ea580c', '#7c3aed', '#0891b2'];
+// Per-project hashed color palette. Curated set of saturated colors that
+// read well as small dots and against our dark popover background.
+const COLORS = ['#4f46e5', '#0ea5e9', '#10b981', '#db2777', '#f97316', '#7c3aed', '#0891b2'];
 function colorForId(id: string): string {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
@@ -37,98 +39,165 @@ function colorForId(id: string): string {
 const STYLES = `
   :host {
     position: fixed;
-    /* Default: lower-right, well above the chat input bar so we don't clip
-       site composer affordances. The actual position is set inline by JS so
-       the user can drag-reposition; this is just the cold-start fallback. */
+    /* Bottom-right with breathing room above the composer. Inline left/top
+       overrides this when the user has dragged. */
     bottom: 120px;
     right: 16px;
     z-index: 2147483647;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     color-scheme: light dark;
   }
-  .dock {
+
+  /* ---------- Launcher (default state, ~32px brand chip) ----------
+     Designed: gradient brand chip with a thin highlight rim and a centred
+     glyph — distinguishes from generic flat-color extension dots and
+     reads as a deliberately-designed object even at small sizes. */
+  .launcher {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, var(--cs-color, #4f46e5), color-mix(in srgb, var(--cs-color, #4f46e5) 70%, #000));
+    box-shadow:
+      0 0 0 1.5px rgba(255, 255, 255, 0.2) inset,
+      0 6px 18px -4px rgba(15, 23, 42, 0.32),
+      0 1px 2px rgba(15, 23, 42, 0.18);
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    transition: transform 140ms cubic-bezier(0.2, 0, 0, 1.2), box-shadow 140ms ease;
     display: flex;
     align-items: center;
-    gap: 6px;
-    background: rgba(15, 23, 42, 0.92);
-    color: #f8fafc;
-    padding: 4px 8px 4px 4px;
-    border-radius: 999px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.18);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    user-select: none;
-    transition: padding 120ms ease, transform 120ms ease;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.94);
   }
-  .drag-handle {
+  /* Centred glyph — a brand mark (•) so the chip reads as designed even at
+     small sizes. */
+  .launcher::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.72);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.16);
+  }
+  .launcher:hover { transform: translateY(-1px) scale(1.04); }
+  .launcher.dragging { cursor: grabbing; transform: scale(1.08); }
+  /* Sync indicator — a tiny green dot at the bottom-right corner when this
+     conversation has been captured. */
+  .launcher.synced::after {
+    content: "";
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: #10b981;
+    box-shadow:
+      0 0 0 2px #ffffff,
+      0 1px 2px rgba(15, 23, 42, 0.25);
+  }
+  /* Hide the launcher while the popover is open so the popover sits cleanly. */
+  :host([data-expanded="true"]) .launcher { display: none; }
+
+  /* ---------- Popover (expanded state) ---------- */
+  .popover {
+    display: none;
+    background: rgba(15, 23, 42, 0.96);
+    color: #f8fafc;
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    width: 232px;
+    overflow: hidden;
+    animation: cs-pop 140ms cubic-bezier(0.2, 0, 0, 1.2);
+  }
+  @keyframes cs-pop {
+    from { opacity: 0; transform: translateY(4px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  :host([data-expanded="true"]) .popover { display: block; }
+
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .header .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--cs-color, #2563eb);
+    flex: 0 0 auto;
+  }
+  .header .title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .header .drag-handle {
     cursor: grab;
     padding: 2px;
     display: flex;
     align-items: center;
+    color: rgba(255, 255, 255, 0.4);
   }
-  .drag-handle:active { cursor: grabbing; }
-  .dock.dragging { transform: scale(1.04); box-shadow: 0 8px 24px rgba(0,0,0,0.32); }
-  .dot {
-    width: 14px; height: 14px; border-radius: 999px;
-    background: var(--cs-color, #2563eb);
-    flex: 0 0 auto;
-    box-shadow: 0 0 0 2px rgba(255,255,255,0.16) inset;
+  .header .drag-handle:hover { color: rgba(255, 255, 255, 0.7); }
+  .header .drag-handle:active { cursor: grabbing; }
+  .header .close {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
     cursor: pointer;
+    padding: 0 2px;
+    font-size: 16px;
+    line-height: 1;
   }
-  .dot.synced::after {
-    content: "";
-    display: block;
-    width: 5px; height: 5px;
-    border-radius: 999px;
-    background: #22c55e;
-    margin: 4px 0 0 4px;
-    box-shadow: 0 0 0 2px #0f172a;
-  }
-  .label {
-    font-size: 11px; font-weight: 600; letter-spacing: 0.01em;
-    max-width: 0; overflow: hidden; white-space: nowrap;
-    transition: max-width 160ms ease, margin-right 160ms ease;
-    margin-right: 0;
-    cursor: pointer;
-  }
-  .dock:hover .label, .dock[data-expanded="true"] .label {
-    max-width: 220px; margin-right: 4px;
-  }
+  .header .close:hover { color: #fff; }
+
   .actions {
-    display: none;
-    gap: 4px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: rgba(255, 255, 255, 0.04);
   }
-  .dock[data-expanded="true"] .actions { display: flex; }
   button.action {
     appearance: none;
     border: 0;
-    background: rgba(255,255,255,0.08);
+    background: rgba(15, 23, 42, 0.96);
     color: inherit;
     font: inherit;
     font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 999px;
+    padding: 10px 8px;
+    text-align: center;
     cursor: pointer;
+    transition: background 120ms ease;
   }
-  button.action:hover { background: rgba(255,255,255,0.16); }
-  button.close {
-    appearance: none;
-    border: 0; background: transparent; color: rgba(255,255,255,0.6);
-    cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1;
-  }
-  button.close:hover { color: #fff; }
+  button.action:hover { background: rgba(255, 255, 255, 0.08); }
+  /* Span the row when there's an odd one out, e.g. "Open side panel". */
+  button.action.full { grid-column: 1 / -1; }
+
   .toast {
     position: absolute;
-    top: calc(100% + 6px);
+    bottom: calc(100% + 6px);
     right: 0;
     background: #0f172a;
     color: #f8fafc;
     padding: 6px 10px;
     border-radius: 8px;
     font-size: 12px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.22);
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(4px);
     pointer-events: none;
     transition: opacity 160ms ease, transform 160ms ease;
     white-space: nowrap;
@@ -150,28 +219,35 @@ export function mountDock() {
   style.textContent = STYLES;
   root.appendChild(style);
 
+  // Two stacked elements share the host's positioning: a 28px launcher
+  // (default) and a popover (expanded). Toggling [data-expanded] on the
+  // host swaps which one is visible.
   const dock = document.createElement('div');
-  dock.className = 'dock';
   dock.setAttribute('role', 'group');
   dock.setAttribute('aria-label', 'Context Stash');
   dock.innerHTML = `
-    <div class="drag-handle" id="cs-drag" title="Drag to move" aria-label="Drag to move">
-      <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" opacity="0.5">
-        <circle cx="3" cy="3" r="1.2"/><circle cx="7" cy="3" r="1.2"/>
-        <circle cx="3" cy="7" r="1.2"/><circle cx="7" cy="7" r="1.2"/>
-        <circle cx="3" cy="11" r="1.2"/><circle cx="7" cy="11" r="1.2"/>
-      </svg>
+    <div class="launcher" id="cs-launcher" title="Context Stash" aria-label="Context Stash"></div>
+    <div class="popover" id="cs-popover" role="dialog" aria-label="Context Stash actions">
+      <div class="header">
+        <div class="dot" id="cs-dot"></div>
+        <div class="title" id="cs-label">Context Stash</div>
+        <div class="drag-handle" id="cs-drag" title="Drag to move" aria-label="Drag to move">
+          <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor">
+            <circle cx="3" cy="3" r="1.2"/><circle cx="7" cy="3" r="1.2"/>
+            <circle cx="3" cy="7" r="1.2"/><circle cx="7" cy="7" r="1.2"/>
+            <circle cx="3" cy="11" r="1.2"/><circle cx="7" cy="11" r="1.2"/>
+          </svg>
+        </div>
+        <button class="close" data-action="close" aria-label="Hide dock for this tab">×</button>
+      </div>
+      <div class="actions">
+        <button class="action" data-action="harvest">Harvest</button>
+        <button class="action" data-action="save-selection">Clip selection</button>
+        <button class="action" data-action="inject">+ Context</button>
+        <button class="action" data-action="open-panel">Side panel</button>
+      </div>
+      <div class="toast" id="cs-toast"></div>
     </div>
-    <div class="dot" id="cs-dot"></div>
-    <div class="label" id="cs-label">Context Stash</div>
-    <div class="actions" id="cs-actions">
-      <button class="action" data-action="harvest">Harvest</button>
-      <button class="action" data-action="save-selection">Clip</button>
-      <button class="action" data-action="inject">+ Context</button>
-      <button class="action" data-action="open-panel">Open</button>
-      <button class="close" data-action="close" aria-label="Hide dock for this tab">×</button>
-    </div>
-    <div class="toast" id="cs-toast"></div>
   `;
   root.appendChild(dock);
 
@@ -185,16 +261,22 @@ export function mountDock() {
   };
 
   function render() {
-    const dot = $('#cs-dot') as HTMLDivElement;
+    const launcher = $('#cs-launcher') as HTMLDivElement;
+    const popoverDot = $('#cs-dot') as HTMLDivElement;
     const label = $('#cs-label') as HTMLDivElement;
-    const color = state.activeProject ? colorForId(state.activeProject.id) : '#64748b';
-    dot.style.setProperty('--cs-color', state.activeProject?.color ?? color);
-    dot.classList.toggle('synced', state.conversationKnown);
-    // Always show the platform — show project name when set, else gentle "no
-    // project yet" hint so the user knows the next clip will auto-create one.
+    const color = state.activeProject ? state.activeProject.color ?? colorForId(state.activeProject.id) : '#4f46e5';
+    launcher.style.setProperty('--cs-color', color);
+    popoverDot.style.setProperty('--cs-color', color);
+    launcher.classList.toggle('synced', state.conversationKnown);
     label.textContent = state.activeProject
       ? `${adapter!.label} · ${state.activeProject.name}`
       : `${adapter!.label} · Quick Stash on save`;
+    // Title-attr tooltip on the launcher tells the whole story without
+    // expanding. Always carries the platform; project + sync state when set.
+    const parts: string[] = [`Context Stash · ${adapter!.label}`];
+    if (state.activeProject) parts.push(state.activeProject.name);
+    if (state.conversationKnown) parts.push('synced');
+    launcher.title = parts.join(' · ');
   }
 
   function showToast(text: string) {
@@ -207,7 +289,10 @@ export function mountDock() {
   let expanded = false;
   function setExpanded(next: boolean) {
     expanded = next;
-    dock.setAttribute('data-expanded', String(expanded));
+    // Style hooks live on `:host([data-expanded])` so we set the attr on
+    // the host element rather than the inner dock div.
+    if (expanded) host.setAttribute('data-expanded', 'true');
+    else host.removeAttribute('data-expanded');
   }
 
   // ---------- Drag-to-reposition ----------
@@ -248,70 +333,84 @@ export function mountDock() {
   const savedPos = readSavedPos();
   if (savedPos) applyPosition(savedPos);
 
-  const dragHandle = $('#cs-drag') as HTMLDivElement;
+  // Shared drag plumbing — both the launcher (default state) and the drag
+  // handle in the popover header trigger the same flow. We track whether
+  // the pointer actually moved more than a few px so a click doesn't
+  // accidentally open the popover after a drag.
   let dragState: { startX: number; startY: number; origLeft: number; origTop: number } | null = null;
-  dragHandle.addEventListener('pointerdown', e => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragHandle.setPointerCapture(e.pointerId);
-    const rect = host.getBoundingClientRect();
-    dragState = {
-      startX: e.clientX,
-      startY: e.clientY,
-      origLeft: rect.left,
-      origTop: rect.top,
-    };
-    dock.classList.add('dragging');
-  });
-  dragHandle.addEventListener('pointermove', e => {
-    if (!dragState) return;
-    const newLeft = dragState.origLeft + (e.clientX - dragState.startX);
-    const newTop = dragState.origTop + (e.clientY - dragState.startY);
-    const dockRect = host.getBoundingClientRect();
-    const left = clamp(newLeft, 0, window.innerWidth - dockRect.width);
-    const top = clamp(newTop, 0, window.innerHeight - dockRect.height);
-    applyPosition({ left, top });
-  });
-  dragHandle.addEventListener('pointerup', e => {
-    if (!dragState) return;
-    dragHandle.releasePointerCapture(e.pointerId);
-    dragState = null;
-    dock.classList.remove('dragging');
-    // Snap to nearest edge if close.
-    const rect = host.getBoundingClientRect();
-    const SNAP = 24;
-    let left = rect.left;
-    let top = rect.top;
-    if (left < SNAP) left = 8;
-    else if (window.innerWidth - rect.right < SNAP) left = window.innerWidth - rect.width - 8;
-    if (top < SNAP) top = 8;
-    else if (window.innerHeight - rect.bottom < SNAP) top = window.innerHeight - rect.height - 8;
-    applyPosition({ left, top });
-    try {
-      localStorage.setItem(POS_KEY, JSON.stringify({ left, top }));
-    } catch {
-      /* ignore quota / privacy errors */
-    }
-  });
-  // Suppress accidental click after drag.
-  dragHandle.addEventListener('click', e => {
-    e.stopPropagation();
+  let launcherDragMoved = false;
+
+  function attachDrag(target: HTMLElement, opts: { addDraggingClass?: boolean } = {}) {
+    target.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      target.setPointerCapture(e.pointerId);
+      const rect = host.getBoundingClientRect();
+      dragState = {
+        startX: e.clientX,
+        startY: e.clientY,
+        origLeft: rect.left,
+        origTop: rect.top,
+      };
+      launcherDragMoved = false;
+      if (opts.addDraggingClass) target.classList.add('dragging');
+    });
+    target.addEventListener('pointermove', e => {
+      if (!dragState) return;
+      const dx = e.clientX - dragState.startX;
+      const dy = e.clientY - dragState.startY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) launcherDragMoved = true;
+      const dockRect = host.getBoundingClientRect();
+      const left = clamp(dragState.origLeft + dx, 0, window.innerWidth - dockRect.width);
+      const top = clamp(dragState.origTop + dy, 0, window.innerHeight - dockRect.height);
+      applyPosition({ left, top });
+    });
+    target.addEventListener('pointerup', e => {
+      if (!dragState) return;
+      try { target.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      dragState = null;
+      if (opts.addDraggingClass) target.classList.remove('dragging');
+      const rect = host.getBoundingClientRect();
+      const SNAP = 24;
+      let left = rect.left;
+      let top = rect.top;
+      if (left < SNAP) left = 8;
+      else if (window.innerWidth - rect.right < SNAP) left = window.innerWidth - rect.width - 8;
+      if (top < SNAP) top = 8;
+      else if (window.innerHeight - rect.bottom < SNAP) top = window.innerHeight - rect.height - 8;
+      applyPosition({ left, top });
+      try {
+        localStorage.setItem(POS_KEY, JSON.stringify({ left, top }));
+      } catch {
+        /* ignore quota / privacy errors */
+      }
+    });
+  }
+
+  attachDrag($('#cs-launcher') as HTMLDivElement, { addDraggingClass: true });
+  attachDrag($('#cs-drag') as HTMLDivElement);
+  // Suppress accidental click on the popover header drag handle.
+  ($('#cs-drag') as HTMLDivElement).addEventListener('click', e => e.stopPropagation());
+
+  // Launcher tap-to-expand. We listen on pointerup rather than click because
+  // pointerdown.preventDefault() (used by the drag plumbing to stop text
+  // selection mid-drag) can suppress the synthetic click on some browsers.
+  // launcherDragMoved is set in attachDrag's pointermove when distance > 4px,
+  // so a real drag doesn't accidentally open the popover.
+  ($('#cs-launcher') as HTMLDivElement).addEventListener('pointerup', () => {
+    if (launcherDragMoved) return;
+    if (expanded) return;
+    setExpanded(true);
   });
 
+  // Action handlers in the popover.
   dock.addEventListener('click', e => {
     const btn = (e.target as Element).closest('button.action, button.close') as HTMLButtonElement | null;
-    if (!btn) {
-      setExpanded(!expanded);
-      return;
-    }
+    if (!btn) return;
     e.stopPropagation();
     const action = btn.getAttribute('data-action');
     if (action === 'close') {
       host.remove();
-      // Per-tab dismissal: try session storage so it survives same-tab
-      // navigations. Edge restricts chrome.storage.session in some content
-      // contexts — fall back to in-memory only (the dock stays gone for the
-      // life of this page either way).
       try {
         void chrome.storage.session
           ?.set({ [`cs:dock-dismissed:${location.host}`]: true })
@@ -322,9 +421,9 @@ export function mountDock() {
       return;
     }
     if (action === 'harvest') {
-      // Same isolated world as the harvester content script — talk directly.
       window.dispatchEvent(new CustomEvent('cs:harvest'));
       showToast('Harvesting…');
+      setExpanded(false);
     }
     if (action === 'save-selection') {
       const selection = window.getSelection()?.toString() ?? '';
@@ -343,13 +442,27 @@ export function mountDock() {
         })
         .catch(() => undefined);
       showToast('Saved to active project');
+      setExpanded(false);
     }
     if (action === 'inject') {
+      setExpanded(false);
       void openInjectPopover();
     }
     if (action === 'open-panel') {
       chrome.runtime.sendMessage({ type: 'DOCK_OPEN_PANEL' }).catch(() => undefined);
+      setExpanded(false);
     }
+  });
+
+  // Click outside the host while expanded — collapse.
+  document.addEventListener('mousedown', e => {
+    if (!expanded) return;
+    const t = e.target as Node | null;
+    if (t && host.contains(t)) return;
+    setExpanded(false);
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && expanded) setExpanded(false);
   });
 
   // ---------- Inject popover ----------
