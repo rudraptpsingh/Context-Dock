@@ -18,6 +18,7 @@ import { summarizeConversation, isSummarizerReady, suggestTags, isLanguageModelR
 import { updateConversation, getMemories } from '../utils/storage';
 import { rankCandidates, type Candidate } from '../utils/ranker';
 import { installOmnibox } from './omnibox';
+import { buildAskUrl, DISPATCH_LABEL, dispatchTargetIds, type DispatchTarget } from '../utils/aiDispatch';
 
 const log = createLogger('background');
 
@@ -100,6 +101,24 @@ async function buildMenusOnce() {
     title: '+ Create New Project...',
     contexts: ['selection'],
   });
+
+  // ---------- Ask another AI ----------
+  // Lets the user pivot a selection from any page (or another AI's response)
+  // straight into a fresh thread on a different model. No API keys; uses
+  // each platform's seeded-prompt URL.
+  await safeCreate({
+    id: 'ask-ai-root',
+    title: 'Ask another AI…',
+    contexts: ['selection'],
+  });
+  for (const target of dispatchTargetIds()) {
+    await safeCreate({
+      id: `ask-ai-${target}`,
+      parentId: 'ask-ai-root',
+      title: DISPATCH_LABEL[target],
+      contexts: ['selection'],
+    });
+  }
 
   await safeCreate({
     id: 'clip-page',
@@ -259,6 +278,16 @@ function showPageToast(tabId: number, message: string) {
 // ---------- Context menu click handlers ----------
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  // ASK ANOTHER AI: open the platform with the selection prefilled.
+  if (typeof info.menuItemId === 'string' && info.menuItemId.startsWith('ask-ai-') && info.selectionText) {
+    const target = info.menuItemId.slice('ask-ai-'.length) as DispatchTarget;
+    if (dispatchTargetIds().includes(target)) {
+      const url = buildAskUrl(target, info.selectionText);
+      chrome.tabs.create({ url, active: true });
+    }
+    return;
+  }
+
   // CREATE NEW PROJECT
   if (info.menuItemId === 'save-selection-new-project' && info.selectionText) {
     if (tab?.id) {
