@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Allow JIT (bun's QuickJS / V8 components need it for compiled binaries). -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <!-- Allow unsigned dylib loads from inside the bundle (bun-compiled binaries
+       embed their runtime; without this they fail to launch on hardened-runtime). -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- The MCP server reads/writes ~/.config/context-stash and is launched as a
+       child of agents (Claude Code, Cursor, Zed) — no Mac App Store sandbox. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

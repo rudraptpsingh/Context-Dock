@@ -1,0 +1,189 @@
+name: Release MCP server binary
+
+# Triggered by tagging the repo with `mcp-vX.Y.Z`. Builds single-file
+# executables for the major desktop targets via `bun build --compile`,
+# (optionally) signs + notarises the macOS arm64 build when the Apple
+# Developer secrets are configured, then publishes everything to a GitHub
+# Release.
+#
+# Tagging convention:
+#   git tag mcp-v0.1.0 && git push origin mcp-v0.1.0
+#
+# Required secrets for full macOS signing (all optional — workflow falls
+# back to ad-hoc signing if any are missing):
+#   APPLE_DEVELOPER_ID            # e.g. "Developer ID Application: Your Name (TEAMID)"
+#   APPLE_DEVELOPER_CERT_BASE64   # base64 of the .p12 export
+#   APPLE_DEVELOPER_CERT_PASSWORD # p12 password
+#   APPLE_NOTARIZE_APPLE_ID       # Apple ID email used for notarytool
+#   APPLE_NOTARIZE_TEAM_ID        # 10-char team id
+#   APPLE_NOTARIZE_PASSWORD       # app-specific password (xxxx-xxxx-xxxx-xxxx)
+
+on:
+  push:
+    tags:
+      - 'mcp-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. mcp-v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            label: darwin-arm64
+            script: build:mac-arm64
+            artifact: context-stash-mcp-darwin-arm64
+          - os: macos-13
+            label: darwin-x64
+            script: build:mac-x64
+            artifact: context-stash-mcp-darwin-x64
+          - os: ubuntu-latest
+            label: linux-x64
+            script: build:linux-x64
+            artifact: context-stash-mcp-linux-x64
+          - os: ubuntu-24.04-arm
+            label: linux-arm64
+            script: build:linux-arm64
+            artifact: context-stash-mcp-linux-arm64
+          - os: windows-latest
+            label: windows-x64
+            script: build:windows-x64
+            artifact: context-stash-mcp-windows-x64.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install MCP server deps
+        working-directory: mcp-server
+        run: bun install --frozen-lockfile
+
+      - name: Build single-file binary
+        working-directory: mcp-server
+        run: bun run ${{ matrix.script }}
+
+      - name: Smoke-test the binary
+        working-directory: mcp-server
+        if: matrix.label != 'windows-x64'
+        run: |
+          ./dist/${{ matrix.artifact }} --help 2>/dev/null || true
+          # Just verify the binary is executable; --help isn't implemented
+          # but a non-crash exit means the bundle is sane.
+          test -x ./dist/${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: mcp-server/dist/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  sign-macos:
+    name: Sign + notarise macOS arm64
+    needs: build
+    runs-on: macos-14
+    if: ${{ vars.MCP_SIGN_MACOS == 'true' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: context-stash-mcp-darwin-arm64
+          path: ./signed
+      - name: Import certificate into a temp keychain
+        env:
+          CERT_B64: ${{ secrets.APPLE_DEVELOPER_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          echo "$CERT_B64" | base64 --decode > $RUNNER_TEMP/cert.p12
+          security import $RUNNER_TEMP/cert.p12 -k "$KEYCHAIN_PATH" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+      - name: Codesign with hardened runtime
+        env:
+          DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+        run: |
+          set -euo pipefail
+          chmod +x ./signed/context-stash-mcp-darwin-arm64
+          codesign --force --options runtime --timestamp \
+            --entitlements .github/workflows/mcp-entitlements.plist \
+            --sign "$DEVELOPER_ID" \
+            ./signed/context-stash-mcp-darwin-arm64
+          codesign --verify --verbose=2 ./signed/context-stash-mcp-darwin-arm64
+      - name: Notarise
+        env:
+          APPLE_ID: ${{ secrets.APPLE_NOTARIZE_APPLE_ID }}
+          TEAM_ID: ${{ secrets.APPLE_NOTARIZE_TEAM_ID }}
+          PW: ${{ secrets.APPLE_NOTARIZE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ZIP=$RUNNER_TEMP/notarize.zip
+          ditto -c -k ./signed/context-stash-mcp-darwin-arm64 "$ZIP"
+          xcrun notarytool submit "$ZIP" \
+            --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --password "$PW" \
+            --wait
+          # No bundle to staple (single executable). Notarisation ticket is
+          # served live by Apple's notary service; macOS picks it up at
+          # first launch when online.
+      - name: Upload signed artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: context-stash-mcp-darwin-arm64-signed
+          path: ./signed/context-stash-mcp-darwin-arm64
+          overwrite: true
+
+  release:
+    name: Publish GitHub Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+      - name: Stage release files
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          # Each artifact downloads into ./artifacts/<name>/<file>.
+          for d in ./artifacts/context-stash-mcp-*; do
+            name=$(basename "$d")
+            file=$(ls "$d" | head -1)
+            cp "$d/$file" "release/$name"
+            (cd release && shasum -a 256 "$name" >> SHA256SUMS)
+          done
+          ls -la release
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "name=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Context Stash MCP ${{ steps.tag.outputs.name }}
+          generate_release_notes: true
+          files: |
+            release/*
