@@ -42,3 +42,6 @@ coverage/
 # Live captures (regenerated per run; useful but not version-controlled)
 tests/fixtures/real/*/live-*.html
 
+# Packaged release artifacts (rebuild with `npm run package`)
+releases/
+
