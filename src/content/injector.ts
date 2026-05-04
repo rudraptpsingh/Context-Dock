@@ -3,7 +3,8 @@
  * Vanilla JS implementation for reliable content script injection
  */
 
-// SVG Icons as strings
+// Reserved for the disabled floating widget — re-enabled in a follow-up.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const ICONS = {
   folder: `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
     <defs>
@@ -369,6 +370,7 @@ const STYLES = `
   }
 `;
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function setReactTextarea(el: HTMLTextAreaElement, value: string): boolean {
   try {
     // Get the setter from the native prototype to bypass React's tracking
@@ -396,6 +398,7 @@ function setReactTextarea(el: HTMLTextAreaElement, value: string): boolean {
 /**
  * Robustly inserts text into a ContentEditable div (Claude, Gemini)
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function insertIntoContentEditable(el: HTMLElement, text: string): boolean {
   try {
     el.focus();

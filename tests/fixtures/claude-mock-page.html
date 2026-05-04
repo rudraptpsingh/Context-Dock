@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head>
+    <title>E2E Claude thread - Claude</title>
+  </head>
+  <body>
+    <main>
+      <div data-testid="conversation">
+        <div data-test-render-count="1">
+          <div class="font-user-message">What's the best sourdough hydration?</div>
+        </div>
+        <div data-test-render-count="2">
+          <div class="font-claude-message">78% works for an open crumb.</div>
+        </div>
+      </div>
+    </main>
+    <script>
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const main = document.querySelector('main');
+          if (main) main.appendChild(document.createElement('span'));
+        }, 200);
+      });
+    </script>
+  </body>
+</html>

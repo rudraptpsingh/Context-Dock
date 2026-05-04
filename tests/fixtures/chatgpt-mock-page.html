@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head>
+    <title>E2E mock thread | ChatGPT</title>
+  </head>
+  <body>
+    <main>
+      <div data-message-id="m-user-1" data-message-author-role="user">
+        <div class="markdown">What is the meaning of life?</div>
+      </div>
+      <div
+        data-message-id="m-asst-1"
+        data-message-author-role="assistant"
+        data-message-model-slug="gpt-4o"
+      >
+        <div class="markdown">42, according to Adams.</div>
+      </div>
+    </main>
+    <script>
+      // Help the harvester's MutationObserver fire even on a static page by
+      // appending a no-op node shortly after load.
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const main = document.querySelector('main');
+          if (main) main.appendChild(document.createElement('span'));
+        }, 200);
+      });
+    </script>
+  </body>
+</html>

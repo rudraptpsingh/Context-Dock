@@ -1,0 +1,9 @@
+{
+  "name": "com.contextstash.mcp_bridge",
+  "description": "Context Stash MCP bridge: lets the Chrome extension push harvested conversations to the local MCP server.",
+  "path": "{{ABSOLUTE_PATH_TO_BINARY}}",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://{{EXTENSION_ID}}/"
+  ]
+}

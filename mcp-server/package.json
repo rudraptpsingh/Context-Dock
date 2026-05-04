@@ -1,0 +1,25 @@
+{
+  "name": "@context-stash/mcp-server",
+  "version": "0.1.0",
+  "description": "Local MCP server that exposes Context Stash conversations to MCP-aware agents (Claude Code, Cursor, Zed).",
+  "type": "module",
+  "bin": {
+    "context-stash-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:binary": "bun build src/index.ts --compile --outfile=dist/context-stash-mcp",
+    "dev": "tsc -p tsconfig.json -w",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.3"
+  },
+  "files": [
+    "dist"
+  ]
+}

@@ -27,7 +27,7 @@ export default function CreateProjectModal({ onSubmit, onClose }: CreateProjectM
         // If it succeeds, the parent will unmount this component.
         // If it fails, we catch it here to reset the loading state.
         await onSubmit(trimmedName);
-      } catch (error) {
+      } catch {
         // If save fails, we stop the loading state so the user can 
         // correct the name and try again without losing their input.
         setIsSubmitting(false);

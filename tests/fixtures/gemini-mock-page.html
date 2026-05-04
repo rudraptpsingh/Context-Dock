@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+  <head>
+    <title>E2E Gemini thread - Gemini</title>
+  </head>
+  <body>
+    <main>
+      <div class="conversation-container">
+        <div class="user-message-bubble-color">What is the Model Context Protocol?</div>
+        <div class="model-response">An open standard for AI assistants to connect to external systems.</div>
+      </div>
+    </main>
+    <script>
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const main = document.querySelector('main');
+          if (main) main.appendChild(document.createElement('span'));
+        }, 200);
+      });
+    </script>
+  </body>
+</html>

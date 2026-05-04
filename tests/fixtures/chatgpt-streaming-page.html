@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Streaming thread | ChatGPT</title>
+  </head>
+  <body>
+    <main>
+      <div data-message-id="m-user-1" data-message-author-role="user">
+        <div class="markdown">Tell me a haiku about debouncing.</div>
+      </div>
+      <div
+        id="assistant-bubble"
+        data-message-id="m-asst-1"
+        data-message-author-role="assistant"
+        data-message-model-slug="gpt-4o"
+      >
+        <div class="markdown" id="asst-md"></div>
+      </div>
+    </main>
+    <script>
+      // Simulate streaming: a global helper the test calls to append tokens.
+      // The adapter detects streaming by the presence of [data-testid="stop-button"]
+      // in the DOM, so we add/remove it (matching real ChatGPT, which swaps the
+      // toolbar entirely when streaming ends).
+      window.__cs_stream_append = function (text, { streaming } = {}) {
+        const md = document.getElementById('asst-md');
+        if (text) md.textContent += text;
+        const main = document.querySelector('main');
+        let stop = document.querySelector('[data-testid="stop-button"]');
+        if (streaming && !stop) {
+          stop = document.createElement('button');
+          stop.setAttribute('data-testid', 'stop-button');
+          stop.textContent = 'Stop';
+          main.appendChild(stop);
+        } else if (!streaming && stop) {
+          stop.remove();
+        }
+      };
+    </script>
+  </body>
+</html>

@@ -68,7 +68,7 @@ export function insertTextIntoChat(text: string): boolean {
     document.execCommand('insertText', false, text);
     input.dispatchEvent(new Event('input', { bubbles: true }));
     return true;
-  } catch (e) {
+  } catch {
     // Manual fallback
     if (input instanceof HTMLTextAreaElement) {
         input.value = text + '\n\n' + input.value;

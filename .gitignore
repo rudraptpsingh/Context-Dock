@@ -31,3 +31,14 @@ npm-debug.log*
 .cache/
 .parcel-cache/
 
+# Test artifacts
+test-results/
+playwright-report/
+coverage/
+
+# Live validation persistent profile (per-developer, contains login cookies)
+.live-profile/
+
+# Live captures (regenerated per run; useful but not version-controlled)
+tests/fixtures/real/*/live-*.html
+
