@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { MessageSquare, FolderOpen, Server, Upload, AlertTriangle } from 'lucide-react';
+import { MessageSquare, FolderOpen, Server, Upload, AlertTriangle, Settings } from 'lucide-react';
 import Header from './components/Header';
 import SnippetList from './components/SnippetList';
 import EmptyState from './components/EmptyState';
@@ -10,6 +10,7 @@ import ConversationList from './components/ConversationList';
 import BulkImportButton from './components/BulkImportButton';
 import BulkImportStatus from './components/BulkImportStatus';
 import MemoriesPanel from './components/MemoriesPanel';
+import SettingsPanel from './components/SettingsPanel';
 import { useBulkImportProgress } from './hooks/useBulkImport';
 import ConversationDetail from './components/ConversationDetail';
 import McpSetupWizard from './components/McpSetupWizard';
@@ -19,7 +20,7 @@ import { Snippet } from '../types';
 import { importChatGPTExport } from '../utils/chatgptImporter';
 import { wipeAll } from '../utils/storage';
 
-type Tab = 'snippets' | 'conversations';
+type Tab = 'snippets' | 'conversations' | 'settings';
 
 export default function App() {
   const {
@@ -222,6 +223,18 @@ export default function App() {
               </span>
             )}
           </button>
+          <button
+            onClick={() => setTab('settings')}
+            className={`px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
+              tab === 'settings'
+                ? 'border-blue-600 text-blue-700'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+            title="Settings & diagnostics"
+            aria-label="Settings"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
         </nav>
       )}
 
@@ -286,13 +299,21 @@ export default function App() {
                 <MemoriesPanel />
                 <ConversationList
                   conversations={conversationsApi.conversations}
-                  onOpen={setOpenConversationId}
+                  onOpen={id => {
+                    setOpenConversationId(id);
+                    // Mark "viewed now" so the list's "updated" badge clears.
+                    void conversationsApi.update(id, { lastViewedAt: Date.now() });
+                  }}
                   onToggleAutoSync={conversationsApi.setAutoSync}
                   onDelete={conversationsApi.remove}
                 />
               </>
             )}
           </>
+        )}
+
+        {tab === 'settings' && (
+          <SettingsPanel onLaunchMcpWizard={() => setShowMcpWizard(true)} />
         )}
       </main>
 
