@@ -34,7 +34,7 @@ export default function BulkImportButton({ busy }: Props) {
       <button
         onClick={() => setOpen(o => !o)}
         disabled={busy}
-        className="text-xs px-2.5 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-1 disabled:opacity-60"
+        className="text-xs px-2.5 py-1 rounded-md bg-brand-600 text-white hover:bg-brand-700 inline-flex items-center gap-1 disabled:opacity-60 shadow-soft-sm"
         title="One-click import every conversation from a chat platform"
       >
         {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <CloudDownload className="w-3 h-3" />}

@@ -17,16 +17,18 @@ test('floating dock mounts on a chat page', async ({ context }) => {
 
   // The dock lives in a Shadow DOM rooted at #cs-dock-root. Reach into it.
   await page.waitForFunction(
-    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.dock'),
+    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.launcher'),
     null,
     { timeout: 8_000 },
   );
 
-  const dockText = await page.evaluate(() => {
+  // Launcher carries platform + project info via its title attribute,
+  // and the popover (when opened) renders the same in its header label.
+  const launcherTitle = await page.evaluate(() => {
     const root = document.getElementById('cs-dock-root')?.shadowRoot;
-    return root?.querySelector('.dock')?.textContent?.trim() ?? '';
+    return (root?.querySelector('.launcher') as HTMLElement | null)?.title ?? '';
   });
-  expect(dockText).toContain('ChatGPT');
+  expect(launcherTitle).toContain('ChatGPT');
 });
 
 test('saving a snippet with no project auto-creates "Quick Stash" and saves into it', async ({
@@ -92,7 +94,7 @@ test('dock position persists across reloads via localStorage', async ({ context,
   await page.goto('https://chatgpt.com/c/dock-pos');
   await page.waitForLoadState('domcontentloaded');
   await page.waitForFunction(
-    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.dock'),
+    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.launcher'),
     null,
     { timeout: 8_000 },
   );
@@ -106,7 +108,7 @@ test('dock position persists across reloads via localStorage', async ({ context,
   });
   await page.reload();
   await page.waitForFunction(
-    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.dock'),
+    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.launcher'),
     null,
     { timeout: 8_000 },
   );
@@ -174,7 +176,7 @@ test('dock "+ Context" inject flow ranks snippets and inserts into a textarea', 
   await tab.goto('https://chatgpt.com/c/inject-test');
   await tab.waitForLoadState('domcontentloaded');
   await tab.waitForFunction(
-    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.dock'),
+    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.launcher'),
     null,
     { timeout: 8_000 },
   );
@@ -186,10 +188,12 @@ test('dock "+ Context" inject flow ranks snippets and inserts into a textarea', 
     ta.dispatchEvent(new Event('input', { bubbles: true }));
   });
 
-  // Open dock and click "+ Context".
+  // Open launcher → click "+ Context" inside the popover.
   await tab.evaluate(() => {
     const root = document.getElementById('cs-dock-root')?.shadowRoot;
-    (root?.querySelector('.dock') as HTMLElement)?.click();
+    (root?.querySelector('.launcher') as HTMLElement)?.dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true }),
+    );
     (root?.querySelector('button[data-action="inject"]') as HTMLButtonElement)?.click();
   });
 
@@ -229,18 +233,18 @@ test('dock harvest button triggers a HARVEST_CONVERSATION write', async ({ conte
   await page.waitForLoadState('domcontentloaded');
 
   await page.waitForFunction(
-    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.dock'),
+    () => !!document.getElementById('cs-dock-root')?.shadowRoot?.querySelector('.launcher'),
     null,
     { timeout: 8_000 },
   );
 
-  // Click the harvest action via the dock's shadow root.
+  // Tap the launcher to expand the popover, then click Harvest.
   await page.evaluate(() => {
     const root = document.getElementById('cs-dock-root')?.shadowRoot;
-    const dock = root?.querySelector('.dock') as HTMLElement | null;
-    dock?.click(); // expand
-    const harvestBtn = root?.querySelector('button[data-action="harvest"]') as HTMLButtonElement | null;
-    harvestBtn?.click();
+    (root?.querySelector('.launcher') as HTMLElement)?.dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true }),
+    );
+    (root?.querySelector('button[data-action="harvest"]') as HTMLButtonElement | null)?.click();
   });
 
   // Open the side panel and poll storage for the harvested conversation.

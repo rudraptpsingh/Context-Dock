@@ -91,10 +91,29 @@ export default function ConversationDetail({ conversation, onBack, onToggleAutoS
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 custom-scrollbar">
         {conversation.turns.map(turn => (
-          <div key={turn.id} className="rounded-lg border border-slate-100 bg-white p-3 shadow-sm">
-            <div className="text-[11px] font-semibold text-slate-600 mb-1.5">
-              {ROLE_LABEL[turn.role] ?? turn.role}
-              {turn.model ? <span className="ml-2 text-slate-400 font-normal">{turn.model}</span> : null}
+          <div
+            key={turn.id}
+            className="group rounded-lg border border-slate-100 bg-white p-3 shadow-sm relative"
+          >
+            <div className="text-[11px] font-semibold text-slate-600 mb-1.5 flex items-center justify-between gap-2">
+              <span>
+                {ROLE_LABEL[turn.role] ?? turn.role}
+                {turn.model ? <span className="ml-2 text-slate-400 font-normal">{turn.model}</span> : null}
+              </span>
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(turn.content);
+                    toast.success('Copied turn');
+                  } catch {
+                    toast.error('Clipboard write blocked');
+                  }
+                }}
+                className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-slate-400 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-slate-100"
+                title="Copy this turn's content"
+              >
+                Copy
+              </button>
             </div>
             <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed break-words">
               {turn.content}

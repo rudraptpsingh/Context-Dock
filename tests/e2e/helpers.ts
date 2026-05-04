@@ -10,9 +10,22 @@ export function loadFixture(name: string): string {
   return readFileSync(resolve(__dirname, '..', 'fixtures', name), 'utf8');
 }
 
-export async function openSidePanel(context: BrowserContext, extensionId: string): Promise<Page> {
+export async function openSidePanel(
+  context: BrowserContext,
+  extensionId: string,
+  opts: { onboarding?: boolean } = {},
+): Promise<Page> {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/src/sidepanel/index.html`);
+  // Most tests want onboarding out of the way. Pre-set the dismissal flag and
+  // reload so the modal never paints. Tests that explicitly cover onboarding
+  // can pass { onboarding: true } to skip the pre-dismiss.
+  if (opts.onboarding !== true) {
+    await page.evaluate(async () => {
+      await chrome.storage.local.set({ _cs_onboarding_done: Date.now() });
+    });
+    await page.reload();
+  }
   return page;
 }
 

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { MessageSquare, RefreshCw, Trash2, Download, FileJson, FileText } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { MessageSquare, RefreshCw, Trash2, Download, FileJson, FileText, Pin, PinOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { Conversation, LLMPlatform } from '../../types';
 import { downloadJson, downloadMarkdown } from '../../utils/exporter';
@@ -9,6 +9,7 @@ interface Props {
   onOpen: (id: string) => void;
   onToggleAutoSync: (id: string, autoSync: boolean) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onTogglePin?: (id: string, pinned: boolean) => Promise<void>;
 }
 
 const PLATFORM_LABEL: Record<LLMPlatform, string> = {
@@ -18,6 +19,32 @@ const PLATFORM_LABEL: Record<LLMPlatform, string> = {
   perplexity: 'Perplexity',
   custom: 'Custom',
 };
+
+function highlightTerms(text: string, query: string): React.ReactNode {
+  const trimmed = query.trim();
+  if (!trimmed) return text;
+  // Build a single regex from all query tokens, case-insensitive. Escape
+  // user input so it's safe to embed in the regex.
+  const tokens = trimmed
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (!tokens.length) return text;
+  const re = new RegExp(`(${tokens.join('|')})`, 'gi');
+  const parts = text.split(re);
+  return parts.map((part, i) =>
+    re.test(part) ? (
+      <mark
+        key={i}
+        className="bg-yellow-100 text-slate-900 rounded px-0.5"
+      >
+        {part}
+      </mark>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
+  );
+}
 
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -36,6 +63,7 @@ export default function ConversationList({
   onOpen,
   onToggleAutoSync,
   onDelete,
+  onTogglePin,
 }: Props) {
   const [query, setQuery] = useState('');
   const [platformFilter, setPlatformFilter] = useState<LLMPlatform | 'all'>('all');
@@ -53,7 +81,11 @@ export default function ConversationList({
         if (c.tags.some(t => t.toLowerCase().includes(q))) return true;
         return c.turns.some(t => t.content.toLowerCase().includes(q));
       })
-      .sort((a, b) => b.lastSyncedAt - a.lastSyncedAt);
+      .sort((a, b) => {
+        // Pinned rows float to the top; within each group, recency wins.
+        if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+        return b.lastSyncedAt - a.lastSyncedAt;
+      });
   }, [conversations, query, platformFilter, tagFilter]);
 
   const allTags = useMemo(() => {
@@ -133,7 +165,12 @@ export default function ConversationList({
 
       <ul className="divide-y divide-slate-100/70">
         {filtered.map(conv => (
-          <li key={conv.id} className="group p-4 hover:bg-slate-50/80 transition-colors">
+          <li
+            key={conv.id}
+            className={`group p-4 transition-colors ${
+              conv.pinned ? 'bg-blue-50/40 hover:bg-blue-50/70' : 'hover:bg-slate-50/80'
+            }`}
+          >
             <div className="flex items-start justify-between gap-2">
               <button
                 onClick={() => onOpen(conv.id)}
@@ -141,7 +178,7 @@ export default function ConversationList({
                 title="Open conversation"
               >
                 <div className="text-sm font-semibold text-slate-800 truncate flex items-center gap-1.5">
-                  <span className="truncate">{conv.title}</span>
+                  <span className="truncate">{highlightTerms(conv.title, query)}</span>
                   {conv.lastViewedAt !== undefined && conv.lastSyncedAt > conv.lastViewedAt && (
                     <span
                       className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium shrink-0"
@@ -156,7 +193,7 @@ export default function ConversationList({
                     className="text-[12px] text-slate-500 mt-0.5 line-clamp-2"
                     title={conv.summary}
                   >
-                    {conv.summary}
+                    {highlightTerms(conv.summary, query)}
                   </div>
                 )}
                 <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
@@ -177,6 +214,18 @@ export default function ConversationList({
                 </div>
               </button>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {onTogglePin && (
+                  <button
+                    onClick={async () => {
+                      await onTogglePin(conv.id, !conv.pinned);
+                      toast.success(conv.pinned ? 'Unpinned' : 'Pinned');
+                    }}
+                    className={`p-1.5 hover:bg-white rounded-md shadow-sm ring-1 ring-slate-200 ${conv.pinned ? 'text-blue-600' : 'text-slate-400 hover:text-slate-700'}`}
+                    title={conv.pinned ? 'Unpin' : 'Pin to top'}
+                  >
+                    {conv.pinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
+                  </button>
+                )}
                 <button
                   onClick={() => downloadMarkdown(conv).catch(() => toast.error('Export failed'))}
                   className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-white rounded-md shadow-sm ring-1 ring-slate-200"
