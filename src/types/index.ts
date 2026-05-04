@@ -61,6 +61,10 @@ export interface Conversation {
   // unavailable or the user declined it.
   summary?: string;
   summaryGeneratedAt?: number;
+  // Last time the user opened this conversation in the side panel. The list
+  // shows an "updated" badge when lastSyncedAt > lastViewedAt so auto-sync
+  // changes are visible without requiring a manual diff.
+  lastViewedAt?: number;
 }
 
 // ---------- Memory entries (ChatGPT Memory, Claude Memory, etc.) ----------

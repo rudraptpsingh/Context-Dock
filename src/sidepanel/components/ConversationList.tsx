@@ -140,7 +140,17 @@ export default function ConversationList({
                 className="text-left flex-1 min-w-0"
                 title="Open conversation"
               >
-                <div className="text-sm font-semibold text-slate-800 truncate">{conv.title}</div>
+                <div className="text-sm font-semibold text-slate-800 truncate flex items-center gap-1.5">
+                  <span className="truncate">{conv.title}</span>
+                  {conv.lastViewedAt !== undefined && conv.lastSyncedAt > conv.lastViewedAt && (
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium shrink-0"
+                      title="Updated since you last opened this conversation"
+                    >
+                      updated
+                    </span>
+                  )}
+                </div>
                 {conv.summary && (
                   <div
                     className="text-[12px] text-slate-500 mt-0.5 line-clamp-2"
