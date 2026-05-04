@@ -7,6 +7,7 @@ import EmptyState from './components/EmptyState';
 import CreateProjectModal from './components/CreateProjectModal';
 import EditSnippetModal from './components/EditSnippetModal';
 import ConversationList from './components/ConversationList';
+import BulkImportButton from './components/BulkImportButton';
 import ConversationDetail from './components/ConversationDetail';
 import McpSetupWizard from './components/McpSetupWizard';
 import { useProjects } from './hooks/useProjects';
@@ -252,12 +253,13 @@ export default function App() {
                     Open ChatGPT and right-click → "Harvest this conversation".
                   </div>
                   <div className="flex items-center gap-1">
+                    <BulkImportButton />
                     <button
                       onClick={() => fileInputRef.current?.click()}
                       className="text-xs px-2 py-1 rounded-md border border-slate-200 hover:bg-white inline-flex items-center gap-1"
                       title="Import ChatGPT conversations.json"
                     >
-                      <Upload className="w-3 h-3" /> Import
+                      <Upload className="w-3 h-3" /> File
                     </button>
                     <button
                       onClick={() => setShowMcpWizard(true)}

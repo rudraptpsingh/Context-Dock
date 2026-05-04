@@ -8,6 +8,7 @@
 import { findAdapter, PlatformAdapter } from './platforms';
 import { createLogger } from '../utils/logger';
 import { startSpan } from '../utils/tracing';
+import { installBulkImportListener } from './bulk-import';
 
 const log = createLogger('harvester');
 
@@ -171,6 +172,9 @@ function init() {
     host: window.location.hostname,
     ready: false,
   };
+  // Bulk importer listener attaches even when no chat-adapter matches —
+  // the importer keys off hostname directly (chatgpt.com / claude.ai).
+  installBulkImportListener();
   const adapter = findAdapter();
   if (!adapter) {
     log.warn('no-adapter', { host: window.location.hostname });

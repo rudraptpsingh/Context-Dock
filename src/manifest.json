@@ -26,7 +26,8 @@
     "default_path": "src/sidepanel/index.html"
   },
   "action": {
-    "default_title": "Open Context Stash"
+    "default_title": "Open Context Stash",
+    "default_popup": "src/popup/index.html"
   },
   "content_scripts": [
     {

@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Context Stash</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; }
+      body {
+        width: 280px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        font-size: 13px;
+        color: #0f172a;
+        background: #f8fafc;
+      }
+      .header {
+        padding: 10px 12px;
+        background: #0f172a;
+        color: #f8fafc;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .title { font-weight: 600; font-size: 13px; }
+      .project-line {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 11px; color: #cbd5e1;
+      }
+      .project-dot {
+        width: 8px; height: 8px; border-radius: 999px; background: #2563eb;
+      }
+      .section { padding: 8px; }
+      .group-label {
+        font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+        color: #64748b; padding: 6px 4px 2px;
+      }
+      button.row {
+        appearance: none; border: 0; background: transparent;
+        text-align: left; width: 100%;
+        padding: 8px 10px; border-radius: 6px;
+        font: inherit; color: inherit; cursor: pointer;
+        display: flex; align-items: center; justify-content: space-between;
+      }
+      button.row:hover { background: #e2e8f0; }
+      button.row[disabled] { opacity: 0.45; cursor: not-allowed; }
+      .row .meta { font-size: 11px; color: #64748b; }
+      .recent-item {
+        display: block; width: 100%; text-align: left;
+        padding: 6px 10px; border-radius: 6px;
+        font-size: 12px; color: inherit; background: transparent; border: 0; cursor: pointer;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .recent-item:hover { background: #e2e8f0; }
+      .recent-item .platform-tag {
+        font-size: 10px; color: #94a3b8; margin-right: 6px;
+      }
+      .footer {
+        padding: 6px 10px; border-top: 1px solid #e2e8f0;
+        font-size: 11px; color: #64748b; display: flex; justify-content: space-between;
+      }
+      .footer button {
+        appearance: none; border: 0; background: transparent;
+        font: inherit; color: #2563eb; cursor: pointer; padding: 0;
+      }
+      .footer button:hover { text-decoration: underline; }
+      .toast {
+        position: fixed; left: 12px; right: 12px; bottom: 12px;
+        background: #0f172a; color: #f8fafc;
+        padding: 8px 10px; border-radius: 8px; font-size: 12px;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+        opacity: 0; transform: translateY(6px);
+        pointer-events: none; transition: opacity 160ms, transform 160ms;
+      }
+      .toast.show { opacity: 1; transform: translateY(0); }
+      @media (prefers-color-scheme: dark) {
+        body { background: #0f172a; color: #f1f5f9; }
+        button.row:hover, .recent-item:hover { background: #1e293b; }
+        .footer { border-top-color: #1e293b; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div>
+        <div class="title">Context Stash</div>
+        <div class="project-line">
+          <span class="project-dot" id="cs-pop-project-dot"></span>
+          <span id="cs-pop-project-name">No active project</span>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <button id="cs-pop-harvest" class="row">
+        <span>Harvest this conversation</span>
+        <span class="meta">⌘⇧H</span>
+      </button>
+      <button id="cs-pop-import-all" class="row">
+        <span>Import all from this site</span>
+        <span class="meta">↓</span>
+      </button>
+      <button id="cs-pop-open-panel" class="row">
+        <span>Open side panel</span>
+        <span class="meta">⌘⇧K</span>
+      </button>
+    </div>
+    <div class="section" id="cs-pop-recent-section" style="display:none">
+      <div class="group-label">Recent conversations</div>
+      <div id="cs-pop-recent"></div>
+    </div>
+    <div class="section">
+      <div class="group-label">Switch project</div>
+      <div id="cs-pop-projects"></div>
+    </div>
+    <div class="footer">
+      <span id="cs-pop-host"></span>
+      <button id="cs-pop-settings">Settings</button>
+    </div>
+    <div class="toast" id="cs-pop-toast"></div>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>

@@ -237,7 +237,26 @@ interface UpsertResult {
   changed: boolean;
 }
 
-export async function upsertConversation(input: {
+// Serialise all upserts through a single promise chain. chrome.storage.local
+// is read-modify-write; without a mutex, concurrent upserts (e.g. a bulk
+// import sending 4 parallel HARVEST_CONVERSATION messages) collide and only
+// the last writer's array sticks. The chain is process-local — that's fine
+// because the background SW is the only writer for this key.
+let upsertChain: Promise<unknown> = Promise.resolve();
+
+export function upsertConversation(input: {
+  platform: LLMPlatform;
+  platformConversationId: string;
+  url: string;
+  title: string;
+  turns: ConversationTurn[];
+}): Promise<UpsertResult> {
+  const next = upsertChain.then(() => upsertConversationLocked(input));
+  upsertChain = next.catch(() => undefined);
+  return next;
+}
+
+async function upsertConversationLocked(input: {
   platform: LLMPlatform;
   platformConversationId: string;
   url: string;

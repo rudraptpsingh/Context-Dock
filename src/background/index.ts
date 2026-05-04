@@ -471,6 +471,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  // ---------- Bulk import orchestration ----------
+  //
+  // Side panel sends START_BULK_IMPORT { platform }. We find an open tab on
+  // that platform (or open one), forward BULK_IMPORT_START to it, and let
+  // the content script's importer drive the rest. Progress messages from
+  // the content script come back as BULK_IMPORT_PROGRESS via runtime
+  // broadcast and the side panel listens directly.
+
+  if (message.type === 'START_BULK_IMPORT') {
+    (async () => {
+      const platformHosts: Record<string, string[]> = {
+        chatgpt: ['chatgpt.com', 'chat.openai.com'],
+        claude: ['claude.ai'],
+        gemini: ['gemini.google.com'],
+        perplexity: ['www.perplexity.ai', 'perplexity.ai'],
+      };
+      const hosts = platformHosts[message.platform] ?? [];
+      if (!hosts.length) {
+        sendResponse({ ok: false, error: `unknown platform ${message.platform}` });
+        return;
+      }
+      const tabUrlPatterns = hosts.map(h => `*://${h}/*`);
+      const candidates: chrome.tabs.Tab[] = [];
+      for (const url of tabUrlPatterns) candidates.push(...(await chrome.tabs.query({ url })));
+      let tab = candidates[0];
+      if (!tab) {
+        tab = await chrome.tabs.create({ url: `https://${hosts[0]}/`, active: false });
+        // Wait briefly for the content script to install.
+        await new Promise(r => setTimeout(r, 2_500));
+      }
+      if (!tab?.id) {
+        sendResponse({ ok: false, error: 'could not open platform tab' });
+        return;
+      }
+      try {
+        const r = (await chrome.tabs.sendMessage(tab.id, {
+          type: 'BULK_IMPORT_START',
+          platform: message.platform,
+        })) as { ok: boolean; final?: unknown; error?: string };
+        sendResponse(r);
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === 'DOCK_OPEN_PANEL') {
     (async () => {
       try {
