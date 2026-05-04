@@ -8,7 +8,9 @@ import CreateProjectModal from './components/CreateProjectModal';
 import EditSnippetModal from './components/EditSnippetModal';
 import ConversationList from './components/ConversationList';
 import BulkImportButton from './components/BulkImportButton';
+import BulkImportStatus from './components/BulkImportStatus';
 import MemoriesPanel from './components/MemoriesPanel';
+import { useBulkImportProgress } from './hooks/useBulkImport';
 import ConversationDetail from './components/ConversationDetail';
 import McpSetupWizard from './components/McpSetupWizard';
 import { useProjects } from './hooks/useProjects';
@@ -33,6 +35,8 @@ export default function App() {
     updateSnippet,
   } = useProjects();
   const conversationsApi = useConversations();
+  const importProgress = useBulkImportProgress();
+  const importing = !!importProgress && !importProgress.done;
 
   const [tab, setTab] = useState<Tab>('snippets');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -254,7 +258,7 @@ export default function App() {
                     Open ChatGPT and right-click → "Harvest this conversation".
                   </div>
                   <div className="flex items-center gap-1">
-                    <BulkImportButton />
+                    <BulkImportButton busy={importing} />
                     <button
                       onClick={() => fileInputRef.current?.click()}
                       className="text-xs px-2 py-1 rounded-md border border-slate-200 hover:bg-white inline-flex items-center gap-1"
@@ -278,6 +282,7 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+                <BulkImportStatus progress={importProgress} />
                 <MemoriesPanel />
                 <ConversationList
                   conversations={conversationsApi.conversations}

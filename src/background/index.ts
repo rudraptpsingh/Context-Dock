@@ -569,9 +569,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       for (const url of tabUrlPatterns) candidates.push(...(await chrome.tabs.query({ url })));
       let tab = candidates[0];
       if (!tab) {
-        tab = await chrome.tabs.create({ url: `https://${hosts[0]}/`, active: false });
-        // Wait briefly for the content script to install.
-        await new Promise(r => setTimeout(r, 2_500));
+        // Foreground the new tab so the user understands what's happening
+        // and can complete any auth challenges. We then wait a beat for the
+        // content script (run_at=document_idle) to attach.
+        tab = await chrome.tabs.create({ url: `https://${hosts[0]}/`, active: true });
+        await new Promise(r => setTimeout(r, 3_000));
       }
       if (!tab?.id) {
         sendResponse({ ok: false, error: 'could not open platform tab' });
