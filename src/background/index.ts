@@ -14,7 +14,7 @@ import {
 import * as mcp from './mcpBridge';
 import { createLogger } from '../utils/logger';
 import { trace } from '../utils/tracing';
-import { summarizeConversation, isSummarizerReady } from '../utils/builtinAI';
+import { summarizeConversation, isSummarizerReady, suggestTags, isLanguageModelReady } from '../utils/builtinAI';
 import { updateConversation, getMemories } from '../utils/storage';
 import { rankCandidates, type Candidate } from '../utils/ranker';
 import { installOmnibox } from './omnibox';
@@ -186,29 +186,44 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.projects) scheduleMenuRebuild();
 });
 
-// ---------- On-device summarisation (Chrome/Edge built-in AI) ----------
+// ---------- On-device summarisation + auto-tagging (Chrome/Edge built-in AI) ----------
 
 async function summarizeAndStore(conversationId: string): Promise<void> {
   try {
-    if (!(await isSummarizerReady())) return;
     const conversations = await getConversations();
     const conv = conversations.find(c => c.id === conversationId);
     if (!conv) return;
-    // Build a compact transcript so we don't exceed the model's input budget.
-    // Take up to ~6000 chars of the most recent turns (the model handles
-    // overrun gracefully but trimming is faster).
     const text = conv.turns
       .map(t => `${t.role === 'user' ? 'USER' : 'ASSISTANT'}: ${t.content}`)
       .join('\n\n')
       .slice(0, 6_000);
     if (!text) return;
-    const summary = await summarizeConversation(text);
-    if (!summary) return;
-    await updateConversation(conv.id, {
-      summary,
-      summaryGeneratedAt: Date.now(),
-    });
-    log.info('auto-summary', { id: conv.id, length: summary.length });
+
+    // Run summarisation and tagging in parallel — they're independent on-device
+    // calls and we don't want to serialise the latency.
+    const [summary, tags] = await Promise.all([
+      isSummarizerReady().then(ok => (ok ? summarizeConversation(text) : null)),
+      // Only re-run tag suggestion when the user hasn't manually tagged
+      // (preserve their curation), and only when LanguageModel is ready.
+      isLanguageModelReady().then(ok => (ok && conv.tags.length === 0 ? suggestTags(text) : [])),
+    ]);
+
+    const updates: Partial<typeof conv> = {};
+    if (summary) {
+      updates.summary = summary;
+      updates.summaryGeneratedAt = Date.now();
+    }
+    if (tags && tags.length) {
+      updates.tags = tags;
+    }
+    if (Object.keys(updates).length) {
+      await updateConversation(conv.id, updates);
+      log.info('auto-enrich', {
+        id: conv.id,
+        summary: summary ? summary.length : 0,
+        tags: tags?.length ?? 0,
+      });
+    }
   } catch (err) {
     log.debug('summarizeAndStore failed', err instanceof Error ? err.message : String(err));
   }

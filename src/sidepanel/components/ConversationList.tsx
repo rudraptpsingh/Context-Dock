@@ -39,11 +39,13 @@ export default function ConversationList({
 }: Props) {
   const [query, setQuery] = useState('');
   const [platformFilter, setPlatformFilter] = useState<LLMPlatform | 'all'>('all');
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return conversations
       .filter(c => platformFilter === 'all' || c.platform === platformFilter)
+      .filter(c => !tagFilter || c.tags.includes(tagFilter))
       .filter(c => {
         if (!q) return true;
         if (c.title.toLowerCase().includes(q)) return true;
@@ -52,7 +54,13 @@ export default function ConversationList({
         return c.turns.some(t => t.content.toLowerCase().includes(q));
       })
       .sort((a, b) => b.lastSyncedAt - a.lastSyncedAt);
-  }, [conversations, query, platformFilter]);
+  }, [conversations, query, platformFilter, tagFilter]);
+
+  const allTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of conversations) for (const t of c.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+  }, [conversations]);
 
   const platforms = useMemo(() => {
     const s = new Set<LLMPlatform>();
@@ -97,6 +105,32 @@ export default function ConversationList({
         </select>
       </div>
 
+      {allTags.length > 0 && (
+        <div className="px-4 pt-2 pb-2 flex items-center flex-wrap gap-1 border-b border-slate-100/80 bg-white">
+          <span className="text-[10px] uppercase tracking-wide text-slate-400 mr-1">Tags</span>
+          {tagFilter && (
+            <button
+              onClick={() => setTagFilter(null)}
+              className="text-[11px] px-2 py-0.5 rounded-full bg-slate-900 text-white"
+              title="Clear tag filter"
+            >
+              {tagFilter} ×
+            </button>
+          )}
+          {!tagFilter &&
+            allTags.map(([tag, count]) => (
+              <button
+                key={tag}
+                onClick={() => setTagFilter(tag)}
+                className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700"
+                title={`${count} conversation${count === 1 ? '' : 's'}`}
+              >
+                {tag}
+              </button>
+            ))}
+        </div>
+      )}
+
       <ul className="divide-y divide-slate-100/70">
         {filtered.map(conv => (
           <li key={conv.id} className="group p-4 hover:bg-slate-50/80 transition-colors">
@@ -115,13 +149,21 @@ export default function ConversationList({
                     {conv.summary}
                   </div>
                 )}
-                <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2">
+                <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
                   <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">
                     {PLATFORM_LABEL[conv.platform]}
                   </span>
                   <span>{conv.turns.length} turns</span>
                   <span>·</span>
                   <span>{relativeTime(conv.lastSyncedAt)}</span>
+                  {conv.tags.slice(0, 3).map(t => (
+                    <span
+                      key={t}
+                      className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px]"
+                    >
+                      {t}
+                    </span>
+                  ))}
                 </div>
               </button>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
