@@ -208,6 +208,9 @@ function init() {
     }
   });
 
+  // The floating dock lives in the same isolated world; listen for its event.
+  window.addEventListener('cs:harvest', () => emit(adapter, { force: true }));
+
   // SPA navigation: ChatGPT swaps URL without a full reload. Hook history.
   const fireUrlChange = () => {
     lastHash = '';

@@ -451,6 +451,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // ---------- Floating dock actions ----------
+
+  if (message.type === 'DOCK_SAVE_SELECTION') {
+    (async () => {
+      const activeProjectId = await getActiveProjectId();
+      if (!activeProjectId) {
+        if (sender.tab?.id) showPageToast(sender.tab.id, 'No active project. Pick one in the side panel.');
+        return;
+      }
+      await addSnippetToProject(activeProjectId, {
+        type: 'selection',
+        content: String(message.payload?.text ?? ''),
+        sourceUrl: String(message.payload?.sourceUrl ?? ''),
+        sourceTitle: String(message.payload?.sourceTitle ?? ''),
+      });
+      chrome.runtime.sendMessage({ type: 'REFRESH_DATA' }).catch(() => {});
+    })();
+    return false;
+  }
+
+  if (message.type === 'DOCK_OPEN_PANEL') {
+    (async () => {
+      try {
+        const winId = sender.tab?.windowId;
+        if (winId !== undefined && chrome.sidePanel?.open) {
+          await chrome.sidePanel.open({ windowId: winId });
+        }
+      } catch {
+        /* sidePanel.open may not be available in all Chromium builds */
+      }
+    })();
+    return false;
+  }
+
   // ---------- Conversation harvest ----------
 
   if (message.type === 'HARVEST_CONVERSATION') {
